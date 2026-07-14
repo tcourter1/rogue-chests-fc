@@ -12,63 +12,43 @@
 
 # \- Displays each Friends Chat member's \*\*Thieving level\*\* next to their name.
 
-# \- Thieving levels are color coded:
+# \- Shows levels in green when the player has 84 or higher Thieving.
 
-# &#x20; - 🟢 Green = 84+
+# \- Shows levels in red when the player has less than 84 Thieving.
 
-# &#x20; - 🔴 Red = Below 84
-
-# \- Levels are looked up only once when a player joins the Friends Chat.
-
-# \- Results are cached for 2 minutes to avoid repeated lookups while players world hop.
+# \- Caches Hiscore results to avoid repeated lookups while players change worlds.
 
 # 
 
-# \### Low-Level Panel
+# \## Low-Level Panel
 
 # 
 
-# An optional overlay lists all Friends Chat members with \*\*less than 84 Thieving\*\*.
+# The optional overlay lists current Friends Chat members with less than 84 Thieving.
 
 # 
 
-# Features include:
+# The panel includes:
 
 # 
+
+# \- RuneScape or Arial font options
 
 # \- Adjustable font size
 
-# \- Default or Arial font
-
 # \- Custom font color
 
-# \- Custom background color with transparency
+# \- Custom background color and transparency
 
-# \- Automatically resizes based on font size and longest name
+# \- Automatic sizing based on the selected font
 
-# \- Departed members remain in the list in \*italics\* for one minute before being removed
+# \- An ignore list for excluding specific players from the panel
 
-# \- Ignore list for excluding specific players from the panel
+# \- Italicized names for players who recently left the Friends Chat
 
-# 
-
-# \## Configuration
+# \- Automatic removal of departed players after one minute
 
 # 
 
-# The plugin currently provides options for:
-
-# 
-
-# \- Show/Hide Low-Level Panel
-
-# \- Font
-
-# \- Font Size
-
-# \- Font Color
-
-# \- Background Color
-
-# \- Ignored Players
+# Ignored players are still assigned a colored Thieving-level label in the Friends Chat member list.
 
