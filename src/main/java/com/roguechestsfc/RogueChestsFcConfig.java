@@ -12,11 +12,30 @@ import net.runelite.client.config.Range;
 public interface RogueChestsFcConfig extends Config
 {
     @ConfigSection(
-            name = "Under 84 Panel",
-            description = "Settings for the under 84 Thieving member panel",
+            name = "General",
+            description = "General Rogue Chests FC settings",
             position = 0
     )
+    String generalSection = "generalSection";
+
+    @ConfigSection(
+            name = "Under 84 Panel",
+            description = "Settings for the under 84 Thieving member panel",
+            position = 1
+    )
     String lowLevelPanelSection = "lowLevelPanelSection";
+
+    @ConfigItem(
+            keyName = "showLowLevelJoinMessage",
+            name = "Join message",
+            description = "Show a chat message when a member joins with less than 84 Thieving",
+            position = 0,
+            section = generalSection
+    )
+    default boolean showLowLevelJoinMessage()
+    {
+        return true;
+    }
 
     @ConfigItem(
             keyName = "showLowLevelPanel",
@@ -86,7 +105,7 @@ public interface RogueChestsFcConfig extends Config
     @ConfigItem(
             keyName = "ignoredNames",
             name = "Ignored names",
-            description = "RSNs excluded from the low-level panel. Separate multiple names with commas or new lines",
+            description = "RSNs excluded from the panel and join messages. Separate multiple names with commas or new lines",
             position = 5,
             section = lowLevelPanelSection
     )
