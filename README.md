@@ -11,6 +11,7 @@ A RuneLite plugin for members of the **Rogue Chests** Friends Chat.
 - Shows an optional chatbox warning when a player with less than 84 Thieving joins the Friends Chat
 - Supports an ignore list that suppresses warnings, removes players from the under-84 panel, and displays their Thieving level in green
 - Adds a right-click context menu item to add users to the under-84 ignore list
+- Supports a configurable banned-player list that marks matching Friends Chat members in red with `BAN`, skips their Hiscore lookup, and shows a chat warning when they join
 
 ## Under-84 Panel
 

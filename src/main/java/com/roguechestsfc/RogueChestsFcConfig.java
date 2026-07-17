@@ -25,6 +25,14 @@ public interface RogueChestsFcConfig extends Config
     )
     String lowLevelPanelSection = "lowLevelPanelSection";
 
+    @ConfigSection(
+            name = "Banned Players",
+            description = "Players marked as banned in the Friends Chat",
+            position = 2,
+            closedByDefault = true
+    )
+    String bannedPlayersSection = "bannedPlayersSection";
+
     @ConfigItem(
             keyName = "showLowLevelJoinMessage",
             name = "Join message",
@@ -33,6 +41,18 @@ public interface RogueChestsFcConfig extends Config
             section = generalSection
     )
     default boolean showLowLevelJoinMessage()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "showBannedJoinMessage",
+            name = "Banned join message",
+            description = "Show a chat message when a player from the banned names list joins the Friends Chat",
+            position = 1,
+            section = generalSection
+    )
+    default boolean showBannedJoinMessage()
     {
         return true;
     }
@@ -105,11 +125,23 @@ public interface RogueChestsFcConfig extends Config
     @ConfigItem(
             keyName = "ignoredNames",
             name = "Ignored names",
-            description = "RSNs excluded from the panel and join messages. Separate multiple names with commas or new lines",
+            description = "RSNs excluded from the panel and low-level join messages. Separate names with commas or new lines",
             position = 5,
             section = lowLevelPanelSection
     )
     default String ignoredNames()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "bannedNames",
+            name = "Banned names",
+            description = "Players displayed in red with BAN instead of a Thieving level. Separate names with commas or new lines",
+            position = 0,
+            section = bannedPlayersSection
+    )
+    default String bannedNames()
     {
         return "";
     }
