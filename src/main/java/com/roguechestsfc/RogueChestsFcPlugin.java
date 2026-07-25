@@ -2,6 +2,9 @@ package com.roguechestsfc;
 
 import com.google.inject.Provides;
 import java.awt.Color;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
+import java.awt.image.BufferedImage;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import javax.inject.Inject;
@@ -22,12 +26,14 @@ import net.runelite.api.FriendsChatManager;
 import net.runelite.api.FriendsChatMember;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
+import net.runelite.api.Player;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.FriendsChatChanged;
 import net.runelite.api.events.FriendsChatMemberJoined;
 import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOpened;
+import net.runelite.api.events.PlayerSpawned;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
@@ -42,7 +48,10 @@ import net.runelite.client.hiscore.HiscoreSkill;
 import net.runelite.client.hiscore.Skill;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 
 @Slf4j
@@ -54,20 +63,34 @@ import net.runelite.client.util.Text;
 public class RogueChestsFcPlugin extends Plugin
 {
 	private static final String CONFIG_GROUP = "roguechestsfc";
+	private static final int ROGUES_CASTLE_REGION_ID = 13117;
 	private static final String IGNORED_NAMES_KEY = "ignoredNames";
-	private static final String IGNORE_MENU_OPTION = "Plugin ignore";
+	private static final String BANNED_NAMES_KEY = "bannedNames";
+	private static final String CAPTURED_NEARBY_NAMES_KEY =
+			"capturedNearbyNames";
 
-	private static final Duration LOOKUP_COOLDOWN = Duration.ofMinutes(2);
-	private static final Duration JOIN_MESSAGE_COOLDOWN = Duration.ofMinutes(2);
-	private static final Duration DEPARTED_DISPLAY_DURATION = Duration.ofMinutes(1);
+	private static final String IGNORE_MENU_OPTION =
+			"Plugin ignore";
+
+	private static final Duration LOOKUP_COOLDOWN =
+			Duration.ofMinutes(2);
+
+	private static final Duration JOIN_MESSAGE_COOLDOWN =
+			Duration.ofMinutes(2);
+
+	private static final Duration DEPARTED_DISPLAY_DURATION =
+			Duration.ofMinutes(1);
 
 	private static final int LOOKUPS_PER_TICK = 5;
 	private static final int REQUIRED_THIEVING_LEVEL = 84;
 
-	private static final String GREEN_LEVEL_MARKER = " <col=00ff00>";
-	private static final String RED_LEVEL_MARKER = " <col=ff0000>";
-	private static final String LEVEL_SUFFIX = "</col>";
+	private static final String GREEN_LEVEL_MARKER =
+			" <col=00ff00>";
 
+	private static final String RED_LEVEL_MARKER =
+			" <col=ff0000>";
+
+	private static final String LEVEL_SUFFIX = "</col>";
 	private static final String RED_TEXT_OPEN = "<col=ff0000>";
 	private static final String TEXT_CLOSE = "</col>";
 	private static final String BANNED_MEMBER_TEXT = " BAN";
@@ -88,10 +111,18 @@ public class RogueChestsFcPlugin extends Plugin
 	private RogueChestsFcOverlay overlay;
 
 	@Inject
+	private RogueChestsFcPanel panel;
+
+	@Inject
 	private RogueChestsFcConfig config;
 
 	@Inject
 	private ConfigManager configManager;
+
+	@Inject
+	private ClientToolbar clientToolbar;
+
+	private NavigationButton navigationButton;
 
 	private final Map<String, Integer> thievingLevels =
 			new ConcurrentHashMap<>();
@@ -123,15 +154,36 @@ public class RogueChestsFcPlugin extends Plugin
 	private volatile boolean suppressJoinMessages = true;
 
 	@Provides
-	RogueChestsFcConfig provideConfig(ConfigManager configManager)
+	RogueChestsFcConfig provideConfig(
+			ConfigManager configManager)
 	{
-		return configManager.getConfig(RogueChestsFcConfig.class);
+		return configManager.getConfig(
+				RogueChestsFcConfig.class
+		);
 	}
 
 	@Override
 	protected void startUp()
 	{
 		overlayManager.add(overlay);
+
+		BufferedImage icon =
+				ImageUtil.loadImageResource(
+						getClass(),
+						"Chest.png"
+				);
+
+		navigationButton = NavigationButton.builder()
+				.tooltip("Rogue Chests FC")
+				.icon(icon)
+				.priority(5)
+				.panel(panel)
+				.build();
+
+		clientToolbar.addNavigation(navigationButton);
+
+		panel.refresh();
+
 		suppressJoinMessages = true;
 		queueCurrentMembersWhenAvailable();
 	}
@@ -140,6 +192,15 @@ public class RogueChestsFcPlugin extends Plugin
 	protected void shutDown()
 	{
 		overlayManager.remove(overlay);
+
+		if (navigationButton != null)
+		{
+			clientToolbar.removeNavigation(
+					navigationButton
+			);
+
+			navigationButton = null;
+		}
 
 		lookupQueue.clear();
 		pendingLookups.clear();
@@ -153,11 +214,14 @@ public class RogueChestsFcPlugin extends Plugin
 
 		suppressJoinMessages = true;
 
-		clientThread.invoke(this::removeLevelsFromMemberList);
+		clientThread.invoke(
+				this::removeLevelsFromMemberList
+		);
 	}
 
 	@Subscribe
-	public void onFriendsChatChanged(FriendsChatChanged event)
+	public void onFriendsChatChanged(
+			FriendsChatChanged event)
 	{
 		if (event.isJoined())
 		{
@@ -168,14 +232,23 @@ public class RogueChestsFcPlugin extends Plugin
 		else
 		{
 			suppressJoinMessages = true;
+
+			lookupQueue.clear();
+			pendingLookups.clear();
 			pendingJoinMessages.clear();
+			displayNames.clear();
 			currentMembers.clear();
-			markAllMembersDeparted();
+			lowLevelMembers.clear();
+
+			clientThread.invoke(
+					this::removeLevelsFromMemberList
+			);
 		}
 	}
 
 	@Subscribe
-	public void onFriendsChatMemberJoined(FriendsChatMemberJoined event)
+	public void onFriendsChatMemberJoined(
+			FriendsChatMemberJoined event)
 	{
 		FriendsChatMember member = event.getMember();
 
@@ -185,7 +258,8 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		String playerName = member.getName();
-		String normalizedName = normalizeName(playerName);
+		String normalizedName =
+				normalizeName(playerName);
 
 		if (normalizedName.isEmpty())
 		{
@@ -193,6 +267,7 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		currentMembers.add(normalizedName);
+		removeCapturedNearbyName(playerName);
 
 		LowLevelMember lowLevelMember =
 				lowLevelMembers.get(normalizedName);
@@ -217,7 +292,10 @@ public class RogueChestsFcPlugin extends Plugin
 				);
 			}
 
-			clientThread.invoke(this::applyLevelsToMemberList);
+			clientThread.invoke(
+					this::applyLevelsToMemberList
+			);
+
 			return;
 		}
 
@@ -242,7 +320,8 @@ public class RogueChestsFcPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onFriendsChatMemberLeft(FriendsChatMemberLeft event)
+	public void onFriendsChatMemberLeft(
+			FriendsChatMemberLeft event)
 	{
 		FriendsChatMember member = event.getMember();
 
@@ -251,7 +330,8 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		String normalizedName = normalizeName(member.getName());
+		String normalizedName =
+				normalizeName(member.getName());
 
 		currentMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
@@ -261,8 +341,45 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (lowLevelMember != null)
 		{
-			lowLevelMember.setDepartedAt(Instant.now());
+			lowLevelMember.setDepartedAt(
+					Instant.now()
+			);
 		}
+	}
+
+	@Subscribe
+	public void onPlayerSpawned(PlayerSpawned event)
+	{
+		if (!isInFriendsChat() || !isInRoguesCastleRegion())
+		{
+			return;
+		}
+
+		Player player = event.getPlayer();
+		Player localPlayer = client.getLocalPlayer();
+
+		if (player == null || localPlayer == null)
+		{
+			return;
+		}
+
+		String playerName = player.getName();
+		String localPlayerName = localPlayer.getName();
+
+		String normalizedName =
+				normalizeName(playerName);
+
+		String normalizedLocalName =
+				normalizeName(localPlayerName);
+
+		if (normalizedName.isEmpty()
+				|| normalizedName.equals(normalizedLocalName)
+				|| currentMembers.contains(normalizedName))
+		{
+			return;
+		}
+
+		addCapturedNearbyName(playerName);
 	}
 
 	@Subscribe
@@ -270,7 +387,8 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		for (int i = 0; i < LOOKUPS_PER_TICK; i++)
 		{
-			String normalizedName = lookupQueue.poll();
+			String normalizedName =
+					lookupQueue.poll();
 
 			if (normalizedName == null)
 			{
@@ -284,7 +402,8 @@ public class RogueChestsFcPlugin extends Plugin
 	}
 
 	@Subscribe(priority = Float.NEGATIVE_INFINITY)
-	public void onScriptPostFired(ScriptPostFired event)
+	public void onScriptPostFired(
+			ScriptPostFired event)
 	{
 		if (event.getScriptId()
 				== ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD)
@@ -297,18 +416,23 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onMenuOpened(MenuOpened event)
 	{
 		String playerName =
-				findFriendsChatPlayerInMenu(event.getMenuEntries());
+				findFriendsChatPlayerInMenu(
+						event.getMenuEntries()
+				);
 
 		if (playerName.isEmpty())
 		{
 			return;
 		}
 
-		String normalizedName = normalizeName(playerName);
+		String normalizedName =
+				normalizeName(playerName);
 
 		if (normalizedName.isEmpty()
 				|| !currentMembers.contains(normalizedName)
-				|| getIgnoredNames().contains(normalizedName))
+				|| getIgnoredNames().contains(
+				normalizedName
+		))
 		{
 			return;
 		}
@@ -322,27 +446,477 @@ public class RogueChestsFcPlugin extends Plugin
 				)
 				.setType(MenuAction.RUNELITE)
 				.onClick(menuEntry ->
-						addIgnoredName(playerName));
+						addIgnoredNames(playerName));
 	}
 
-	private boolean shouldQueueJoinMessage(String normalizedName)
+	List<String> getIgnoredPlayerNames()
+	{
+		return getConfiguredPlayerNames(
+				config.ignoredNames()
+		);
+	}
+
+	List<String> getBannedPlayerNames()
+	{
+		return getConfiguredPlayerNames(
+				config.bannedNames()
+		);
+	}
+
+	List<String> getCapturedNearbyPlayerNames()
+	{
+		return getConfiguredPlayerNames(
+				config.capturedNearbyNames()
+		);
+	}
+
+	void addIgnoredNames(String names)
+	{
+		addConfiguredNames(
+				IGNORED_NAMES_KEY,
+				config.ignoredNames(),
+				names
+		);
+	}
+
+	void addBannedNames(String names)
+	{
+		addConfiguredNames(
+				BANNED_NAMES_KEY,
+				config.bannedNames(),
+				names
+		);
+	}
+
+	void removeIgnoredName(String playerName)
+	{
+		removeConfiguredName(
+				IGNORED_NAMES_KEY,
+				config.ignoredNames(),
+				playerName
+		);
+	}
+
+	void removeBannedName(String playerName)
+	{
+		removeConfiguredName(
+				BANNED_NAMES_KEY,
+				config.bannedNames(),
+				playerName
+		);
+	}
+
+	void removeCapturedNearbyName(String playerName)
+	{
+		removeConfiguredName(
+				CAPTURED_NEARBY_NAMES_KEY,
+				config.capturedNearbyNames(),
+				playerName
+		);
+	}
+
+	void clearCapturedNearbyNames()
+	{
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				CAPTURED_NEARBY_NAMES_KEY,
+				""
+		);
+
+		panel.refresh();
+	}
+
+	void addCapturedNearbyNamesToBanList()
+	{
+		List<String> capturedNames =
+				getCapturedNearbyPlayerNames();
+
+		if (capturedNames.isEmpty())
+		{
+			return;
+		}
+
+		addConfiguredNames(
+				BANNED_NAMES_KEY,
+				config.bannedNames(),
+				String.join("\n", capturedNames)
+		);
+
+		clearCapturedNearbyNames();
+	}
+
+	void copyIgnoredNames()
+	{
+		copyNamesToClipboard(
+				getIgnoredPlayerNames()
+		);
+	}
+
+	void copyBannedNames()
+	{
+		copyNamesToClipboard(
+				getBannedPlayerNames()
+		);
+	}
+
+	void copyCapturedNearbyNames()
+	{
+		copyNamesToClipboard(
+				getCapturedNearbyPlayerNames()
+		);
+	}
+
+	private void addCapturedNearbyName(String playerName)
+	{
+		String normalizedName =
+				normalizeName(playerName);
+
+		if (normalizedName.isEmpty()
+				|| currentMembers.contains(normalizedName))
+		{
+			return;
+		}
+
+		Map<String, String> capturedNames =
+				getConfiguredPlayerNameMap(
+						config.capturedNearbyNames()
+				);
+
+		if (capturedNames.containsKey(normalizedName))
+		{
+			return;
+		}
+
+		capturedNames.put(
+				normalizedName,
+				Text.toJagexName(playerName)
+		);
+
+		saveConfiguredNames(
+				CAPTURED_NEARBY_NAMES_KEY,
+				capturedNames,
+				false
+		);
+	}
+
+	private void copyNamesToClipboard(
+			List<String> names)
+	{
+		if (names == null || names.isEmpty())
+		{
+			return;
+		}
+
+		String clipboardText =
+				String.join("\n", names);
+
+		try
+		{
+			Toolkit.getDefaultToolkit()
+					.getSystemClipboard()
+					.setContents(
+							new StringSelection(
+									clipboardText
+							),
+							null
+					);
+		}
+		catch (IllegalStateException exception)
+		{
+			log.debug(
+					"Unable to access the system clipboard",
+					exception
+			);
+		}
+	}
+
+	private boolean isInFriendsChat()
+	{
+		return client.getFriendsChatManager() != null;
+	}
+
+	private boolean isInRoguesCastleRegion()
+	{
+		Player localPlayer = client.getLocalPlayer();
+
+		return localPlayer != null
+				&& localPlayer.getWorldLocation().getRegionID()
+				== ROGUES_CASTLE_REGION_ID;
+	}
+
+	private void addConfiguredNames(
+			String configKey,
+			String currentValue,
+			String newNames)
+	{
+		if (newNames == null
+				|| newNames.trim().isEmpty())
+		{
+			return;
+		}
+
+		Map<String, String> namesByNormalizedName =
+				getConfiguredPlayerNameMap(
+						currentValue
+				);
+
+		Arrays.stream(
+						newNames.split("[,\\r\\n]+")
+				)
+				.map(String::trim)
+				.map(Text::toJagexName)
+				.filter(name -> !name.isEmpty())
+				.forEach(name ->
+						namesByNormalizedName.putIfAbsent(
+								normalizeName(name),
+								name
+						)
+				);
+
+		saveConfiguredNames(
+				configKey,
+				namesByNormalizedName,
+				true
+		);
+	}
+
+	private void removeConfiguredName(
+			String configKey,
+			String currentValue,
+			String playerName)
+	{
+		String normalizedName =
+				normalizeName(playerName);
+
+		if (normalizedName.isEmpty())
+		{
+			return;
+		}
+
+		Map<String, String> namesByNormalizedName =
+				getConfiguredPlayerNameMap(
+						currentValue
+				);
+
+		if (namesByNormalizedName.remove(
+				normalizedName
+		) == null)
+		{
+			return;
+		}
+
+		boolean refreshFriendsChat =
+				!CAPTURED_NEARBY_NAMES_KEY.equals(
+						configKey
+				);
+
+		saveConfiguredNames(
+				configKey,
+				namesByNormalizedName,
+				refreshFriendsChat
+		);
+	}
+
+	private void saveConfiguredNames(
+			String configKey,
+			Map<String, String> namesByNormalizedName,
+			boolean refreshFriendsChat)
+	{
+		String value = String.join(
+				"\n",
+				namesByNormalizedName.values()
+		);
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				configKey,
+				value
+		);
+
+		panel.refresh();
+
+		if (refreshFriendsChat)
+		{
+			refreshConfiguredPlayerLists();
+		}
+	}
+
+	private List<String> getConfiguredPlayerNames(
+			String configuredNames)
+	{
+		return new ArrayList<>(
+				getConfiguredPlayerNameMap(
+						configuredNames
+				).values()
+		);
+	}
+
+	private Map<String, String>
+	getConfiguredPlayerNameMap(
+			String configuredNames)
+	{
+		Map<String, String> names =
+				new TreeMap<>();
+
+		if (configuredNames == null
+				|| configuredNames.trim().isEmpty())
+		{
+			return names;
+		}
+
+		Arrays.stream(
+						configuredNames.split(
+								"[,\\r\\n]+"
+						)
+				)
+				.map(String::trim)
+				.map(Text::toJagexName)
+				.filter(name -> !name.isEmpty())
+				.forEach(name ->
+						names.putIfAbsent(
+								normalizeName(name),
+								name
+						)
+				);
+
+		return names;
+	}
+
+	private void removeCurrentMembersFromCapturedList(
+			Set<String> memberNames)
+	{
+		if (memberNames == null || memberNames.isEmpty())
+		{
+			return;
+		}
+
+		Map<String, String> capturedNames =
+				getConfiguredPlayerNameMap(
+						config.capturedNearbyNames()
+				);
+
+		boolean changed = false;
+
+		for (String normalizedName : memberNames)
+		{
+			if (capturedNames.remove(normalizedName) != null)
+			{
+				changed = true;
+			}
+		}
+
+		if (changed)
+		{
+			saveConfiguredNames(
+					CAPTURED_NEARBY_NAMES_KEY,
+					capturedNames,
+					false
+			);
+		}
+	}
+
+	private void refreshConfiguredPlayerLists()
+	{
+		clientThread.invoke(() ->
+		{
+			Set<String> bannedNames =
+					getBannedNames();
+
+			for (String bannedName : bannedNames)
+			{
+				cancelLookup(bannedName);
+				thievingLevels.remove(bannedName);
+				lowLevelMembers.remove(bannedName);
+			}
+
+			FriendsChatManager friendsChatManager =
+					client.getFriendsChatManager();
+
+			if (friendsChatManager != null)
+			{
+				FriendsChatMember[] members =
+						friendsChatManager.getMembers();
+
+				if (members != null)
+				{
+					for (FriendsChatMember member
+							: members)
+					{
+						if (member == null)
+						{
+							continue;
+						}
+
+						String playerName =
+								member.getName();
+
+						String normalizedName =
+								normalizeName(playerName);
+
+						if (normalizedName.isEmpty())
+						{
+							continue;
+						}
+
+						currentMembers.add(
+								normalizedName
+						);
+
+						if (bannedNames.contains(
+								normalizedName
+						))
+						{
+							cancelLookup(
+									normalizedName
+							);
+
+							thievingLevels.remove(
+									normalizedName
+							);
+
+							lowLevelMembers.remove(
+									normalizedName
+							);
+						}
+						else
+						{
+							queueLookup(playerName);
+						}
+					}
+				}
+			}
+
+			applyLevelsToMemberList();
+		});
+	}
+
+	private boolean shouldQueueJoinMessage(
+			String normalizedName)
 	{
 		if (suppressJoinMessages
 				|| !config.showLowLevelJoinMessage()
-				|| getIgnoredNames().contains(normalizedName)
-				|| getBannedNames().contains(normalizedName))
+				|| getIgnoredNames().contains(
+				normalizedName
+		)
+				|| getBannedNames().contains(
+				normalizedName
+		))
 		{
 			return false;
 		}
 
 		Instant lastMessageTime =
-				lastJoinMessageTimes.get(normalizedName);
+				lastJoinMessageTimes.get(
+						normalizedName
+				);
 
 		return lastMessageTime == null
 				|| Duration.between(
 				lastMessageTime,
 				Instant.now()
-		).compareTo(JOIN_MESSAGE_COOLDOWN) >= 0;
+		).compareTo(
+				JOIN_MESSAGE_COOLDOWN
+		) >= 0;
 	}
 
 	private String findFriendsChatPlayerInMenu(
@@ -361,13 +935,17 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			String playerName =
-					extractPlayerName(menuEntry.getTarget());
+					extractPlayerName(
+							menuEntry.getTarget()
+					);
 
 			String normalizedName =
 					normalizeName(playerName);
 
 			if (!normalizedName.isEmpty()
-					&& currentMembers.contains(normalizedName))
+					&& currentMembers.contains(
+					normalizedName
+			))
 			{
 				return playerName;
 			}
@@ -391,7 +969,8 @@ public class RogueChestsFcPlugin extends Plugin
 			FriendsChatMember[] members =
 					friendsChatManager.getMembers();
 
-			if (members == null || members.length == 0)
+			if (members == null
+					|| members.length == 0)
 			{
 				return false;
 			}
@@ -406,7 +985,9 @@ public class RogueChestsFcPlugin extends Plugin
 					continue;
 				}
 
-				String playerName = member.getName();
+				String playerName =
+						member.getName();
+
 				String normalizedName =
 						normalizeName(playerName);
 
@@ -424,10 +1005,15 @@ public class RogueChestsFcPlugin extends Plugin
 				if (bannedPlayer)
 				{
 					cancelLookup(normalizedName);
-					thievingLevels.remove(normalizedName);
-					lowLevelMembers.remove(normalizedName);
+					thievingLevels.remove(
+							normalizedName
+					);
+					lowLevelMembers.remove(
+							normalizedName
+					);
 
-					if (config.showBannedJoinMessage())
+					if (config
+							.showBannedJoinMessage())
 					{
 						showJoinNotification(
 								normalizedName,
@@ -438,11 +1024,15 @@ public class RogueChestsFcPlugin extends Plugin
 				}
 
 				LowLevelMember lowLevelMember =
-						lowLevelMembers.get(normalizedName);
+						lowLevelMembers.get(
+								normalizedName
+						);
 
 				if (lowLevelMember != null)
 				{
-					lowLevelMember.setDepartedAt(null);
+					lowLevelMember.setDepartedAt(
+							null
+					);
 				}
 
 				if (!bannedPlayer)
@@ -451,29 +1041,50 @@ public class RogueChestsFcPlugin extends Plugin
 				}
 			}
 
+			removeCurrentMembersFromCapturedList(
+					loadedMembers
+			);
+
 			for (String normalizedName
-					: new ArrayList<>(currentMembers))
+					: new ArrayList<>(
+					currentMembers
+			))
 			{
-				if (!loadedMembers.contains(normalizedName))
+				if (!loadedMembers.contains(
+						normalizedName
+				))
 				{
-					currentMembers.remove(normalizedName);
-					markMemberDeparted(normalizedName);
+					currentMembers.remove(
+							normalizedName
+					);
+
+					markMemberDeparted(
+							normalizedName
+					);
 				}
 			}
 
 			applyLevelsToMemberList();
+
 			suppressJoinMessages = false;
 
 			return true;
 		});
 	}
 
-	private void cancelLookup(String normalizedName)
+	private void cancelLookup(
+			String normalizedName)
 	{
-		pendingJoinMessages.remove(normalizedName);
+		pendingJoinMessages.remove(
+				normalizedName
+		);
+
 		pendingLookups.remove(normalizedName);
 		displayNames.remove(normalizedName);
-		lookupQueue.removeIf(normalizedName::equals);
+
+		lookupQueue.removeIf(
+				normalizedName::equals
+		);
 	}
 
 	private void queueLookup(String playerName)
@@ -484,7 +1095,8 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		String normalizedName = normalizeName(playerName);
+		String normalizedName =
+				normalizeName(playerName);
 
 		if (normalizedName.isEmpty()
 				|| isBannedPlayer(playerName))
@@ -493,12 +1105,19 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		Instant now = Instant.now();
+
 		Instant lastLookup =
-				lastLookupTimes.get(normalizedName);
+				lastLookupTimes.get(
+						normalizedName
+				);
 
 		if (lastLookup != null
-				&& Duration.between(lastLookup, now)
-				.compareTo(LOOKUP_COOLDOWN) < 0)
+				&& Duration.between(
+				lastLookup,
+				now
+		).compareTo(
+				LOOKUP_COOLDOWN
+		) < 0)
 		{
 			updateLowLevelMemberFromCache(
 					normalizedName,
@@ -506,15 +1125,21 @@ public class RogueChestsFcPlugin extends Plugin
 			);
 
 			applyLevelsToMemberList();
+
 			return;
 		}
 
-		if (!pendingLookups.add(normalizedName))
+		if (!pendingLookups.add(
+				normalizedName
+		))
 		{
 			return;
 		}
 
-		lastLookupTimes.put(normalizedName, now);
+		lastLookupTimes.put(
+				normalizedName,
+				now
+		);
 
 		displayNames.put(
 				normalizedName,
@@ -524,7 +1149,8 @@ public class RogueChestsFcPlugin extends Plugin
 		lookupQueue.add(normalizedName);
 	}
 
-	private void startLookup(String normalizedName)
+	private void startLookup(
+			String normalizedName)
 	{
 		String playerName =
 				displayNames.getOrDefault(
@@ -588,16 +1214,22 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		Skill thieving =
-				result.getSkill(HiscoreSkill.THIEVING);
+				result.getSkill(
+						HiscoreSkill.THIEVING
+				);
 
-		if (thieving == null || thieving.getLevel() < 1)
+		if (thieving == null
+				|| thieving.getLevel() < 1)
 		{
 			return;
 		}
 
 		int level = thieving.getLevel();
 
-		thievingLevels.put(normalizedName, level);
+		thievingLevels.put(
+				normalizedName,
+				level
+		);
 
 		showLowLevelJoinMessage(
 				normalizedName,
@@ -608,7 +1240,9 @@ public class RogueChestsFcPlugin extends Plugin
 		if (level < REQUIRED_THIEVING_LEVEL)
 		{
 			Instant departedAt =
-					currentMembers.contains(normalizedName)
+					currentMembers.contains(
+							normalizedName
+					)
 							? null
 							: Instant.now();
 
@@ -619,26 +1253,36 @@ public class RogueChestsFcPlugin extends Plugin
 						if (existing == null)
 						{
 							return new LowLevelMember(
-									Text.toJagexName(playerName),
+									Text.toJagexName(
+											playerName
+									),
 									departedAt
 							);
 						}
 
 						existing.setName(
-								Text.toJagexName(playerName)
+								Text.toJagexName(
+										playerName
+								)
 						);
 
-						existing.setDepartedAt(departedAt);
+						existing.setDepartedAt(
+								departedAt
+						);
 
 						return existing;
 					});
 		}
 		else
 		{
-			lowLevelMembers.remove(normalizedName);
+			lowLevelMembers.remove(
+					normalizedName
+			);
 		}
 
-		clientThread.invoke(this::applyLevelsToMemberList);
+		clientThread.invoke(
+				this::applyLevelsToMemberList
+		);
 	}
 
 	private void showLowLevelJoinMessage(
@@ -646,16 +1290,25 @@ public class RogueChestsFcPlugin extends Plugin
 			String playerName,
 			int thievingLevel)
 	{
-		if (!pendingJoinMessages.remove(normalizedName))
+		if (!pendingJoinMessages.remove(
+				normalizedName
+		))
 		{
 			return;
 		}
 
 		if (!config.showLowLevelJoinMessage()
-				|| thievingLevel >= REQUIRED_THIEVING_LEVEL
-				|| getIgnoredNames().contains(normalizedName)
-				|| getBannedNames().contains(normalizedName)
-				|| !currentMembers.contains(normalizedName))
+				|| thievingLevel
+				>= REQUIRED_THIEVING_LEVEL
+				|| getIgnoredNames().contains(
+				normalizedName
+		)
+				|| getBannedNames().contains(
+				normalizedName
+		)
+				|| !currentMembers.contains(
+				normalizedName
+		))
 		{
 			return;
 		}
@@ -663,7 +1316,9 @@ public class RogueChestsFcPlugin extends Plugin
 		showJoinNotification(
 				normalizedName,
 				playerName,
-				"(" + thievingLevel + " Thieving)"
+				"("
+						+ thievingLevel
+						+ " Thieving)"
 		);
 	}
 
@@ -672,33 +1327,56 @@ public class RogueChestsFcPlugin extends Plugin
 			String playerName,
 			String notificationText)
 	{
-		if (!currentMembers.contains(normalizedName))
+		if (!currentMembers.contains(
+				normalizedName
+		))
 		{
 			return;
 		}
 
 		Instant now = Instant.now();
+
 		Instant lastMessageTime =
-				lastJoinMessageTimes.get(normalizedName);
+				lastJoinMessageTimes.get(
+						normalizedName
+				);
 
 		if (lastMessageTime != null
-				&& Duration.between(lastMessageTime, now)
-				.compareTo(JOIN_MESSAGE_COOLDOWN) < 0)
+				&& Duration.between(
+				lastMessageTime,
+				now
+		).compareTo(
+				JOIN_MESSAGE_COOLDOWN
+		) < 0)
 		{
 			return;
 		}
 
-		lastJoinMessageTimes.put(normalizedName, now);
+		lastJoinMessageTimes.put(
+				normalizedName,
+				now
+		);
 
-		String message = new ChatMessageBuilder()
-				.append(Text.toJagexName(playerName))
-				.append(" has joined the channel - ")
-				.append(Color.RED, notificationText)
-				.build();
+		String message =
+				new ChatMessageBuilder()
+						.append(
+								Text.toJagexName(
+										playerName
+								)
+						)
+						.append(
+								" has joined the channel - "
+						)
+						.append(
+								Color.RED,
+								notificationText
+						)
+						.build();
 
 		clientThread.invoke(() ->
 				client.addChatMessage(
-						ChatMessageType.FRIENDSCHATNOTIFICATION,
+						ChatMessageType
+								.FRIENDSCHATNOTIFICATION,
 						"",
 						message,
 						""
@@ -706,9 +1384,12 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
-	private boolean isBannedPlayer(String playerName)
+	private boolean isBannedPlayer(
+			String playerName)
 	{
-		return getBannedNames().contains(normalizeName(playerName));
+		return getBannedNames().contains(
+				normalizeName(playerName)
+		);
 	}
 
 	private void updateLowLevelMemberFromCache(
@@ -721,10 +1402,13 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		Integer level =
-				thievingLevels.get(normalizedName);
+				thievingLevels.get(
+						normalizedName
+				);
 
 		if (level == null
-				|| level >= REQUIRED_THIEVING_LEVEL)
+				|| level
+				>= REQUIRED_THIEVING_LEVEL)
 		{
 			return;
 		}
@@ -736,76 +1420,41 @@ public class RogueChestsFcPlugin extends Plugin
 					if (existing == null)
 					{
 						return new LowLevelMember(
-								Text.toJagexName(playerName),
-								currentMembers.contains(normalizedName)
+								Text.toJagexName(
+										playerName
+								),
+								currentMembers.contains(
+										normalizedName
+								)
 										? null
 										: Instant.now()
 						);
 					}
 
 					existing.setName(
-							Text.toJagexName(playerName)
+							Text.toJagexName(
+									playerName
+							)
 					);
 
-					if (currentMembers.contains(normalizedName))
+					if (currentMembers.contains(
+							normalizedName
+					))
 					{
-						existing.setDepartedAt(null);
+						existing.setDepartedAt(
+								null
+						);
 					}
 
 					return existing;
 				});
 	}
 
-	private void addIgnoredName(String playerName)
+	private String extractPlayerName(
+			String target)
 	{
-		String cleanedName =
-				Text.toJagexName(playerName);
-
-		String normalizedName =
-				normalizeName(cleanedName);
-
-		if (normalizedName.isEmpty())
-		{
-			return;
-		}
-
-		Set<String> ignoredNames = getIgnoredNames();
-
-		if (ignoredNames.contains(normalizedName))
-		{
-			return;
-		}
-
-		String currentValue = config.ignoredNames();
-		String updatedValue;
-
-		if (currentValue == null
-				|| currentValue.trim().isEmpty())
-		{
-			updatedValue = cleanedName;
-		}
-		else
-		{
-			updatedValue =
-					currentValue.trim()
-							+ ", "
-							+ cleanedName;
-		}
-
-		configManager.setConfiguration(
-				CONFIG_GROUP,
-				IGNORED_NAMES_KEY,
-				updatedValue
-		);
-
-		pendingJoinMessages.remove(normalizedName);
-
-		clientThread.invoke(this::applyLevelsToMemberList);
-	}
-
-	private String extractPlayerName(String target)
-	{
-		if (target == null || target.trim().isEmpty())
+		if (target == null
+				|| target.trim().isEmpty())
 		{
 			return "";
 		}
@@ -814,7 +1463,9 @@ public class RogueChestsFcPlugin extends Plugin
 				removePluginFormatting(target);
 
 		return Text.toJagexName(
-				Text.removeTags(withoutFormatting)
+				Text.removeTags(
+						withoutFormatting
+				)
 		);
 	}
 
@@ -822,25 +1473,16 @@ public class RogueChestsFcPlugin extends Plugin
 			String normalizedName)
 	{
 		LowLevelMember member =
-				lowLevelMembers.get(normalizedName);
+				lowLevelMembers.get(
+						normalizedName
+				);
 
-		if (member != null && !member.isDeparted())
+		if (member != null
+				&& !member.isDeparted())
 		{
-			member.setDepartedAt(Instant.now());
-		}
-	}
-
-	private void markAllMembersDeparted()
-	{
-		Instant now = Instant.now();
-
-		for (LowLevelMember member
-				: lowLevelMembers.values())
-		{
-			if (!member.isDeparted())
-			{
-				member.setDepartedAt(now);
-			}
+			member.setDepartedAt(
+					Instant.now()
+			);
 		}
 	}
 
@@ -848,22 +1490,32 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		Instant now = Instant.now();
 
-		lowLevelMembers.entrySet().removeIf(entry ->
-		{
-			LowLevelMember member = entry.getValue();
-			Instant departedAt = member.getDepartedAt();
+		lowLevelMembers.entrySet()
+				.removeIf(entry ->
+				{
+					LowLevelMember member =
+							entry.getValue();
 
-			return departedAt != null
-					&& Duration.between(departedAt, now)
-					.compareTo(DEPARTED_DISPLAY_DURATION)
-					>= 0;
-		});
+					Instant departedAt =
+							member.getDepartedAt();
+
+					return departedAt != null
+							&& Duration.between(
+							departedAt,
+							now
+					).compareTo(
+							DEPARTED_DISPLAY_DURATION
+					) >= 0;
+				});
 	}
 
 	List<LowLevelMember> getLowLevelMembers()
 	{
-		Set<String> ignoredNames = getIgnoredNames();
-		Set<String> bannedNames = getBannedNames();
+		Set<String> ignoredNames =
+				getIgnoredNames();
+
+		Set<String> bannedNames =
+				getBannedNames();
 
 		List<LowLevelMember> members =
 				new ArrayList<>();
@@ -871,8 +1523,12 @@ public class RogueChestsFcPlugin extends Plugin
 		for (Map.Entry<String, LowLevelMember> entry
 				: lowLevelMembers.entrySet())
 		{
-			if (!ignoredNames.contains(entry.getKey())
-					&& !bannedNames.contains(entry.getKey()))
+			if (!ignoredNames.contains(
+					entry.getKey()
+			)
+					&& !bannedNames.contains(
+					entry.getKey()
+			))
 			{
 				members.add(entry.getValue());
 			}
@@ -892,15 +1548,20 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private Set<String> getIgnoredNames()
 	{
-		return parseConfiguredNames(config.ignoredNames());
+		return parseConfiguredNames(
+				config.ignoredNames()
+		);
 	}
 
 	private Set<String> getBannedNames()
 	{
-		return parseConfiguredNames(config.bannedNames());
+		return parseConfiguredNames(
+				config.bannedNames()
+		);
 	}
 
-	private Set<String> parseConfiguredNames(String configuredNames)
+	private Set<String> parseConfiguredNames(
+			String configuredNames)
 	{
 		Set<String> names = new HashSet<>();
 
@@ -911,7 +1572,9 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		Arrays.stream(
-						configuredNames.split("[,\\r\\n]+")
+						configuredNames.split(
+								"[,\\r\\n]+"
+						)
 				)
 				.map(String::trim)
 				.map(this::normalizeName)
@@ -925,7 +1588,9 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		Widget chatList =
 				client.getWidget(
-						InterfaceID.ChatchannelCurrent.LIST
+						InterfaceID
+								.ChatchannelCurrent
+								.LIST
 				);
 
 		if (chatList == null
@@ -934,12 +1599,18 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		Set<String> ignoredNames = getIgnoredNames();
-		Set<String> bannedNames = getBannedNames();
+		Set<String> ignoredNames =
+				getIgnoredNames();
 
-		Widget[] children = chatList.getChildren();
+		Set<String> bannedNames =
+				getBannedNames();
 
-		for (int i = 0; i < children.length; i += 3)
+		Widget[] children =
+				chatList.getChildren();
+
+		for (int i = 0;
+		     i < children.length;
+		     i += 3)
 		{
 			Widget nameWidget = children[i];
 
@@ -955,17 +1626,27 @@ public class RogueChestsFcPlugin extends Plugin
 
 			String playerName =
 					Text.toJagexName(
-							Text.removeTags(originalText)
+							Text.removeTags(
+									originalText
+							)
 					);
 
 			String normalizedName =
 					normalizeName(playerName);
 
-			if (bannedNames.contains(normalizedName))
+			if (bannedNames.contains(
+					normalizedName
+			))
 			{
 				cancelLookup(normalizedName);
-				thievingLevels.remove(normalizedName);
-				lowLevelMembers.remove(normalizedName);
+
+				thievingLevels.remove(
+						normalizedName
+				);
+
+				lowLevelMembers.remove(
+						normalizedName
+				);
 
 				nameWidget.setText(
 						RED_TEXT_OPEN
@@ -978,23 +1659,30 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			Integer thievingLevel =
-					thievingLevels.get(normalizedName);
+					thievingLevels.get(
+							normalizedName
+					);
 
 			if (thievingLevel == null)
 			{
-				nameWidget.setText(originalText);
+				nameWidget.setText(
+						originalText
+				);
+
 				continue;
 			}
 
 			boolean showGreen =
-					thievingLevel >= REQUIRED_THIEVING_LEVEL
+					thievingLevel
+							>= REQUIRED_THIEVING_LEVEL
 							|| ignoredNames.contains(
 							normalizedName
 					);
 
-			String levelMarker = showGreen
-					? GREEN_LEVEL_MARKER
-					: RED_LEVEL_MARKER;
+			String levelMarker =
+					showGreen
+							? GREEN_LEVEL_MARKER
+							: RED_LEVEL_MARKER;
 
 			nameWidget.setText(
 					originalText
@@ -1009,7 +1697,9 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		Widget chatList =
 				client.getWidget(
-						InterfaceID.ChatchannelCurrent.LIST
+						InterfaceID
+								.ChatchannelCurrent
+								.LIST
 				);
 
 		if (chatList == null
@@ -1018,9 +1708,12 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		Widget[] children = chatList.getChildren();
+		Widget[] children =
+				chatList.getChildren();
 
-		for (int i = 0; i < children.length; i += 3)
+		for (int i = 0;
+		     i < children.length;
+		     i += 3)
 		{
 			Widget nameWidget = children[i];
 
@@ -1035,17 +1728,23 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 	}
 
-	private String removePluginFormatting(String text)
+	private String removePluginFormatting(
+			String text)
 	{
 		if (text == null)
 		{
 			return "";
 		}
 
-		String withoutLevel = removeLevelFromText(text);
-		String plainText = Text.removeTags(withoutLevel);
+		String withoutLevel =
+				removeLevelFromText(text);
 
-		if (plainText.endsWith(BANNED_MEMBER_TEXT))
+		String plainText =
+				Text.removeTags(withoutLevel);
+
+		if (plainText.endsWith(
+				BANNED_MEMBER_TEXT
+		))
 		{
 			plainText = plainText.substring(
 					0,
@@ -1057,7 +1756,8 @@ public class RogueChestsFcPlugin extends Plugin
 		return plainText;
 	}
 
-	private String removeLevelFromText(String text)
+	private String removeLevelFromText(
+			String text)
 	{
 		if (text == null)
 		{
@@ -1065,10 +1765,14 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		int greenIndex =
-				text.indexOf(GREEN_LEVEL_MARKER);
+				text.indexOf(
+						GREEN_LEVEL_MARKER
+				);
 
 		int redIndex =
-				text.indexOf(RED_LEVEL_MARKER);
+				text.indexOf(
+						RED_LEVEL_MARKER
+				);
 
 		int markerIndex;
 
@@ -1082,16 +1786,22 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 		else
 		{
-			markerIndex =
-					Math.min(greenIndex, redIndex);
+			markerIndex = Math.min(
+					greenIndex,
+					redIndex
+			);
 		}
 
 		return markerIndex == -1
 				? text
-				: text.substring(0, markerIndex);
+				: text.substring(
+				0,
+				markerIndex
+		);
 	}
 
-	private String normalizeName(String playerName)
+	private String normalizeName(
+			String playerName)
 	{
 		if (playerName == null)
 		{
@@ -1131,7 +1841,8 @@ public class RogueChestsFcPlugin extends Plugin
 			return departedAt;
 		}
 
-		void setDepartedAt(Instant departedAt)
+		void setDepartedAt(
+				Instant departedAt)
 		{
 			this.departedAt = departedAt;
 		}

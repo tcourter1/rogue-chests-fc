@@ -33,7 +33,7 @@ public class RogueChestsFcOverlay extends OverlayPanel
         this.config = config;
 
         setPosition(OverlayPosition.TOP_LEFT);
-        setPriority(OverlayPriority.MED);
+        setPriority(OverlayPriority.HIGHEST);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
     }
 
