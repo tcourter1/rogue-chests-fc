@@ -1,20 +1,19 @@
 # Rogue Chests FC
 
-A RuneLite plugin for members of the **Rogue Chests** Friends Chat.
+Utilities to assist with managing the Rogue Chests Friends Chat.
 
 ## Features
 
-- Displays each Friends Chat member's **Thieving level** next to their name
-- Shows levels in green for players with **84+ Thieving**
-- Shows levels in red for players with **less than 84 Thieving**
-- Caches Hiscore lookups to minimize repeated requests while players hop worlds
-- Optional chat notifications when a player with less than 84 Thieving joins the Friends Chat
-- Optional chat notifications when a banned player joins the Friends Chat
-- Adds a right-click **Plugin Ignore** option directly to Friends Chat members
-- Persistent **Under-84 Ignore List** managed from the plugin sidebar
-- Persistent **Banned Players** list managed from the plugin sidebar
-- Automatically marks banned Friends Chat members with a red **BAN** label and skips their Hiscore lookup
-- Automatically records nearby non-Friends Chat players while inside the Rogue's Castle region, making it easy to copy or add them to the ban list
+- Displays each Friends Chat member's Thieving level directly in the member list.
+- Highlights members below 84 Thieving.
+- Under 84 side panel with customizable font, colors, and background.
+- One-click ignore list for trusted members.
+- Persistent banned player list with BAN indicator in the Friends Chat.
+- Automatically captures nearby non-FC players at Rogue's Castle for quick review.
+- Copy, clear, and promote captured players directly to the ban list.
+- Automatically sorts the Friends Chat with banned players first, followed by members below 84 Thieving.
+- Tracks how long Friends Chat members remain within render distance at Rogue's Castle.
+- Optional overtime panel showing members exceeding a configurable time limit, with customizable appearance and optional chat notifications.
 
 ## Under-84 Panel
 
