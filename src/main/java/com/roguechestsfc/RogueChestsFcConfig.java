@@ -25,6 +25,13 @@ public interface RogueChestsFcConfig extends Config
     )
     String lowLevelPanelSection = "lowLevelPanelSection";
 
+    @ConfigSection(
+            name = "Overtime Panel",
+            description = "Settings for tracking FC members who remain nearby too long",
+            position = 2
+    )
+    String overtimePanelSection = "overtimePanelSection";
+
     @ConfigItem(
             keyName = "showLowLevelJoinMessage",
             name = "Join message",
@@ -112,6 +119,99 @@ public interface RogueChestsFcConfig extends Config
     default Color panelBackgroundColor()
     {
         return new Color(0, 0, 0, 150);
+    }
+
+    @ConfigItem(
+            keyName = "showOvertimePanel",
+            name = "Show panel",
+            description = "Show FC members who remain within render distance longer than the configured limit",
+            position = 0,
+            section = overtimePanelSection
+    )
+    default boolean showOvertimePanel()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "overtimePanelFont",
+            name = "Font",
+            description = "Choose the font used by the overtime panel",
+            position = 1,
+            section = overtimePanelSection
+    )
+    default PanelFont overtimePanelFont()
+    {
+        return PanelFont.DEFAULT;
+    }
+
+    @Range(
+            min = 10,
+            max = 32
+    )
+    @ConfigItem(
+            keyName = "overtimePanelFontSize",
+            name = "Font size",
+            description = "Set the font size used by the overtime panel",
+            position = 2,
+            section = overtimePanelSection
+    )
+    default int overtimePanelFontSize()
+    {
+        return 14;
+    }
+
+    @ConfigItem(
+            keyName = "overtimePanelFontColor",
+            name = "Font color",
+            description = "Set the color of names and timers displayed in the overtime panel",
+            position = 3,
+            section = overtimePanelSection
+    )
+    default Color overtimePanelFontColor()
+    {
+        return Color.WHITE;
+    }
+
+    @Alpha
+    @ConfigItem(
+            keyName = "overtimePanelBackgroundColor",
+            name = "Background color",
+            description = "Set the overtime panel background color and transparency",
+            position = 4,
+            section = overtimePanelSection
+    )
+    default Color overtimePanelBackgroundColor()
+    {
+        return new Color(0, 0, 0, 150);
+    }
+
+    @Range(
+            min = 1,
+            max = 60
+    )
+    @ConfigItem(
+            keyName = "overtimeMinutes",
+            name = "Time limit",
+            description = "Minutes a nearby FC member may remain before appearing in the overtime panel",
+            position = 5,
+            section = overtimePanelSection
+    )
+    default int overtimeMinutes()
+    {
+        return 15;
+    }
+
+    @ConfigItem(
+            keyName = "showOvertimeNotification",
+            name = "Chat notification",
+            description = "Show a one-time chat message when a nearby FC member exceeds the time limit",
+            position = 6,
+            section = overtimePanelSection
+    )
+    default boolean showOvertimeNotification()
+    {
+        return true;
     }
 
     @ConfigItem(

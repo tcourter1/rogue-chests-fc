@@ -24,6 +24,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.FriendsChatManager;
 import net.runelite.api.FriendsChatMember;
+import net.runelite.api.GameState;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
@@ -31,9 +32,11 @@ import net.runelite.api.ScriptID;
 import net.runelite.api.events.FriendsChatChanged;
 import net.runelite.api.events.FriendsChatMemberJoined;
 import net.runelite.api.events.FriendsChatMemberLeft;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.PlayerSpawned;
+import net.runelite.api.events.PostClientTick;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
@@ -111,6 +114,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private RogueChestsFcOverlay overlay;
 
 	@Inject
+	private RogueChestsFcOvertimeOverlay overtimeOverlay;
+
+	@Inject
 	private RogueChestsFcPanel panel;
 
 	@Inject
@@ -142,6 +148,15 @@ public class RogueChestsFcPlugin extends Plugin
 	private final Set<String> currentMembers =
 			ConcurrentHashMap.newKeySet();
 
+	private final Map<String, Instant> nearbyMemberStartTimes =
+			new ConcurrentHashMap<>();
+
+	private final Map<String, String> nearbyMemberDisplayNames =
+			new ConcurrentHashMap<>();
+
+	private final Set<String> overtimeNotificationsSent =
+			ConcurrentHashMap.newKeySet();
+
 	private final Set<String> pendingLookups =
 			ConcurrentHashMap.newKeySet();
 
@@ -166,6 +181,7 @@ public class RogueChestsFcPlugin extends Plugin
 	protected void startUp()
 	{
 		overlayManager.add(overlay);
+		overlayManager.add(overtimeOverlay);
 
 		BufferedImage icon =
 				ImageUtil.loadImageResource(
@@ -192,6 +208,7 @@ public class RogueChestsFcPlugin extends Plugin
 	protected void shutDown()
 	{
 		overlayManager.remove(overlay);
+		overlayManager.remove(overtimeOverlay);
 
 		if (navigationButton != null)
 		{
@@ -211,6 +228,7 @@ public class RogueChestsFcPlugin extends Plugin
 		thievingLevels.clear();
 		lowLevelMembers.clear();
 		currentMembers.clear();
+		clearNearbyMemberTracking();
 
 		suppressJoinMessages = true;
 
@@ -239,6 +257,7 @@ public class RogueChestsFcPlugin extends Plugin
 			displayNames.clear();
 			currentMembers.clear();
 			lowLevelMembers.clear();
+			clearNearbyMemberTracking();
 
 			clientThread.invoke(
 					this::removeLevelsFromMemberList
@@ -335,6 +354,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 		currentMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
+		removeNearbyMemberTracking(normalizedName);
 
 		LowLevelMember lowLevelMember =
 				lowLevelMembers.get(normalizedName);
@@ -399,6 +419,24 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		removeExpiredDepartedMembers();
+		updateNearbyMemberTracking();
+	}
+
+	@Subscribe
+	public void onGameStateChanged(
+			GameStateChanged event)
+	{
+		if (event.getGameState() != GameState.LOGGED_IN)
+		{
+			clearNearbyMemberTracking();
+		}
+	}
+
+	@Subscribe(priority = Float.NEGATIVE_INFINITY)
+	public void onPostClientTick(
+			PostClientTick event)
+	{
+		applyLevelsToMemberList();
 	}
 
 	@Subscribe(priority = Float.NEGATIVE_INFINITY)
@@ -628,6 +666,171 @@ public class RogueChestsFcPlugin extends Plugin
 					exception
 			);
 		}
+	}
+
+	private void updateNearbyMemberTracking()
+	{
+		if (!isInFriendsChat()
+				|| !isInRoguesCastleRegion())
+		{
+			clearNearbyMemberTracking();
+			return;
+		}
+
+		Player localPlayer = client.getLocalPlayer();
+
+		if (localPlayer == null)
+		{
+			clearNearbyMemberTracking();
+			return;
+		}
+
+		String localPlayerName =
+				normalizeName(localPlayer.getName());
+
+		Instant now = Instant.now();
+		Duration threshold =
+				Duration.ofMinutes(
+						config.overtimeMinutes()
+				);
+
+		Set<String> visibleMembers =
+				new HashSet<>();
+
+		for (Player player : client.getPlayers())
+		{
+			if (player == null)
+			{
+				continue;
+			}
+
+			String playerName = player.getName();
+			String normalizedName =
+					normalizeName(playerName);
+
+			if (normalizedName.isEmpty()
+					|| normalizedName.equals(
+					localPlayerName
+			)
+					|| !currentMembers.contains(
+					normalizedName
+			))
+			{
+				continue;
+			}
+
+			visibleMembers.add(normalizedName);
+
+			nearbyMemberStartTimes.putIfAbsent(
+					normalizedName,
+					now
+			);
+
+			nearbyMemberDisplayNames.put(
+					normalizedName,
+					Text.toJagexName(playerName)
+			);
+
+			Instant startTime =
+					nearbyMemberStartTimes.get(
+							normalizedName
+					);
+
+			Duration elapsed =
+					Duration.between(
+							startTime,
+							now
+					);
+
+			if (elapsed.compareTo(threshold) >= 0)
+			{
+				if (config.showOvertimeNotification()
+						&& overtimeNotificationsSent.add(
+						normalizedName
+				))
+				{
+					showOvertimeNotification(
+							playerName,
+							config.overtimeMinutes()
+					);
+				}
+			}
+			else
+			{
+				overtimeNotificationsSent.remove(
+						normalizedName
+				);
+			}
+		}
+
+		for (String normalizedName
+				: new ArrayList<>(
+				nearbyMemberStartTimes.keySet()
+		))
+		{
+			if (!visibleMembers.contains(
+					normalizedName
+			))
+			{
+				removeNearbyMemberTracking(
+						normalizedName
+				);
+			}
+		}
+	}
+
+	private void showOvertimeNotification(
+			String playerName,
+			int limitMinutes)
+	{
+		String message =
+				new ChatMessageBuilder()
+						.append(
+								Color.RED,
+								Text.toJagexName(
+										playerName
+								)
+						)
+						.append(
+								" has remained within render distance for over "
+						)
+						.append(
+								Color.RED,
+								limitMinutes
+										+ " minutes"
+						)
+						.append(".")
+						.build();
+
+		client.addChatMessage(
+				ChatMessageType.GAMEMESSAGE,
+				"",
+				message,
+				""
+		);
+	}
+
+	private void removeNearbyMemberTracking(
+			String normalizedName)
+	{
+		nearbyMemberStartTimes.remove(
+				normalizedName
+		);
+
+		nearbyMemberDisplayNames.remove(
+				normalizedName
+		);
+
+		overtimeNotificationsSent.remove(
+				normalizedName
+		);
+	}
+
+	private void clearNearbyMemberTracking()
+	{
+		nearbyMemberStartTimes.clear();
+		nearbyMemberDisplayNames.clear();
+		overtimeNotificationsSent.clear();
 	}
 
 	private boolean isInFriendsChat()
@@ -1509,6 +1712,73 @@ public class RogueChestsFcPlugin extends Plugin
 				});
 	}
 
+	List<OvertimeMember> getOvertimeMembers()
+	{
+		if (!isInFriendsChat()
+				|| !isInRoguesCastleRegion())
+		{
+			return new ArrayList<>();
+		}
+
+		Instant now = Instant.now();
+		Duration threshold =
+				Duration.ofMinutes(
+						config.overtimeMinutes()
+				);
+
+		List<OvertimeMember> members =
+				new ArrayList<>();
+
+		for (Map.Entry<String, Instant> entry
+				: nearbyMemberStartTimes.entrySet())
+		{
+			String normalizedName = entry.getKey();
+
+			if (!currentMembers.contains(
+					normalizedName
+			))
+			{
+				continue;
+			}
+
+			Duration elapsed =
+					Duration.between(
+							entry.getValue(),
+							now
+					);
+
+			if (elapsed.compareTo(threshold) < 0)
+			{
+				continue;
+			}
+
+			String displayName =
+					nearbyMemberDisplayNames.getOrDefault(
+							normalizedName,
+							normalizedName
+					);
+
+			members.add(
+					new OvertimeMember(
+							displayName,
+							elapsed
+					)
+			);
+		}
+
+		members.sort(
+				Comparator.comparing(
+								OvertimeMember::getElapsed
+						).reversed()
+						.thenComparing(
+								OvertimeMember::getName,
+								String.CASE_INSENSITIVE_ORDER
+						)
+		);
+
+		return members;
+	}
+
 	List<LowLevelMember> getLowLevelMembers()
 	{
 		Set<String> ignoredNames =
@@ -1608,6 +1878,9 @@ public class RogueChestsFcPlugin extends Plugin
 		Widget[] children =
 				chatList.getChildren();
 
+		List<FriendsChatRow> rows =
+				new ArrayList<>();
+
 		for (int i = 0;
 		     i < children.length;
 		     i += 3)
@@ -1633,6 +1906,24 @@ public class RogueChestsFcPlugin extends Plugin
 
 			String normalizedName =
 					normalizeName(playerName);
+
+			int priority =
+					getFriendsChatSortPriority(
+							normalizedName,
+							ignoredNames,
+							bannedNames
+					);
+
+			rows.add(
+					new FriendsChatRow(
+							getRowWidgets(
+									children,
+									i
+							),
+							nameWidget.getOriginalY(),
+							priority
+					)
+			);
 
 			if (bannedNames.contains(
 					normalizedName
@@ -1689,6 +1980,86 @@ public class RogueChestsFcPlugin extends Plugin
 							+ levelMarker
 							+ thievingLevel
 							+ LEVEL_SUFFIX
+			);
+		}
+
+		sortFriendsChatRows(rows);
+	}
+
+	private int getFriendsChatSortPriority(
+			String normalizedName,
+			Set<String> ignoredNames,
+			Set<String> bannedNames)
+	{
+		if (bannedNames.contains(normalizedName))
+		{
+			return 0;
+		}
+
+		Integer thievingLevel =
+				thievingLevels.get(normalizedName);
+
+		if (thievingLevel != null
+				&& thievingLevel < REQUIRED_THIEVING_LEVEL
+				&& !ignoredNames.contains(normalizedName))
+		{
+			return 1;
+		}
+
+		return 2;
+	}
+
+	private List<Widget> getRowWidgets(
+			Widget[] children,
+			int startIndex)
+	{
+		List<Widget> rowWidgets =
+				new ArrayList<>(3);
+
+		for (int i = startIndex;
+		     i < children.length
+					 && i < startIndex + 3;
+		     i++)
+		{
+			Widget widget = children[i];
+
+			if (widget != null)
+			{
+				rowWidgets.add(widget);
+			}
+		}
+
+		return rowWidgets;
+	}
+
+	private void sortFriendsChatRows(
+			List<FriendsChatRow> rows)
+	{
+		if (rows.size() < 2)
+		{
+			return;
+		}
+
+		List<Integer> rowPositions =
+				new ArrayList<>(rows.size());
+
+		for (FriendsChatRow row : rows)
+		{
+			rowPositions.add(row.getBaseY());
+		}
+
+		rowPositions.sort(Integer::compareTo);
+
+		rows.sort(
+				Comparator.comparingInt(
+						FriendsChatRow::getPriority
+				)
+		);
+
+		for (int i = 0; i < rows.size(); i++)
+		{
+			rows.get(i).moveTo(
+					rowPositions.get(i)
 			);
 		}
 	}
@@ -1811,6 +2182,74 @@ public class RogueChestsFcPlugin extends Plugin
 		return Text.toJagexName(
 				Text.removeTags(playerName)
 		).toLowerCase(Locale.ROOT);
+	}
+
+
+	static class FriendsChatRow
+	{
+		private final List<Widget> widgets;
+		private final int baseY;
+		private final int priority;
+
+		FriendsChatRow(
+				List<Widget> widgets,
+				int baseY,
+				int priority)
+		{
+			this.widgets = widgets;
+			this.baseY = baseY;
+			this.priority = priority;
+		}
+
+		int getBaseY()
+		{
+			return baseY;
+		}
+
+		int getPriority()
+		{
+			return priority;
+		}
+
+		void moveTo(int targetY)
+		{
+			for (Widget widget : widgets)
+			{
+				int offset =
+						widget.getOriginalY()
+								- baseY;
+
+				widget.setOriginalY(
+						targetY + offset
+				);
+
+				widget.revalidate();
+			}
+		}
+	}
+
+	static class OvertimeMember
+	{
+		private final String name;
+		private final Duration elapsed;
+
+		OvertimeMember(
+				String name,
+				Duration elapsed)
+		{
+			this.name = name;
+			this.elapsed = elapsed;
+		}
+
+		String getName()
+		{
+			return name;
+		}
+
+		Duration getElapsed()
+		{
+			return elapsed;
+		}
 	}
 
 	static class LowLevelMember
