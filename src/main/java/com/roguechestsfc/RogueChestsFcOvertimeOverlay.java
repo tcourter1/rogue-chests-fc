@@ -55,10 +55,14 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
         }
 
         Font normalFont = createFont();
+        Font pausedFont = normalFont.deriveFont(Font.ITALIC);
         Font titleFont = normalFont.deriveFont(Font.BOLD);
 
         FontMetrics normalMetrics =
                 graphics.getFontMetrics(normalFont);
+
+        FontMetrics pausedMetrics =
+                graphics.getFontMetrics(pausedFont);
 
         FontMetrics titleMetrics =
                 graphics.getFontMetrics(titleFont);
@@ -69,9 +73,14 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
         {
             String elapsed = format(member.getElapsed());
 
+            FontMetrics memberMetrics =
+                    member.isPaused()
+                            ? pausedMetrics
+                            : normalMetrics;
+
             width = Math.max(
                     width,
-                    normalMetrics.stringWidth(
+                    memberMetrics.stringWidth(
                             member.getName() + elapsed
                     )
             );
@@ -109,12 +118,17 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
 
         for (RogueChestsFcPlugin.OvertimeMember member : members)
         {
+            Font memberFont =
+                    member.isPaused()
+                            ? pausedFont
+                            : normalFont;
+
             panelComponent.getChildren().add(
                     LineComponent.builder()
                             .left(member.getName())
                             .right(format(member.getElapsed()))
-                            .leftFont(normalFont)
-                            .rightFont(normalFont)
+                            .leftFont(memberFont)
+                            .rightFont(memberFont)
                             .leftColor(
                                     config.overtimePanelFontColor()
                             )

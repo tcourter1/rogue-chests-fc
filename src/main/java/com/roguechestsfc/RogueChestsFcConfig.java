@@ -123,7 +123,7 @@ public interface RogueChestsFcConfig extends Config
 
     @ConfigItem(
             keyName = "showOvertimePanel",
-            name = "Show panel",
+            name = "Show overtime panel",
             description = "Show FC members who remain within render distance longer than the configured limit",
             position = 0,
             section = overtimePanelSection
@@ -133,11 +133,39 @@ public interface RogueChestsFcConfig extends Config
         return true;
     }
 
+    @Range(
+            min = 1,
+            max = 60
+    )
+    @ConfigItem(
+            keyName = "overtimeMinutes",
+            name = "Time limit",
+            description = "Minutes a nearby FC member may remain before appearing in the overtime panel",
+            position = 1,
+            section = overtimePanelSection
+    )
+    default int overtimeMinutes()
+    {
+        return 15;
+    }
+
+    @ConfigItem(
+            keyName = "showOvertimeNotification",
+            name = "Chat notification",
+            description = "Show a one-time chat message when a nearby FC member exceeds the time limit",
+            position = 2,
+            section = overtimePanelSection
+    )
+    default boolean showOvertimeNotification()
+    {
+        return true;
+    }
+
     @ConfigItem(
             keyName = "overtimePanelFont",
             name = "Font",
             description = "Choose the font used by the overtime panel",
-            position = 1,
+            position = 3,
             section = overtimePanelSection
     )
     default PanelFont overtimePanelFont()
@@ -153,7 +181,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "overtimePanelFontSize",
             name = "Font size",
             description = "Set the font size used by the overtime panel",
-            position = 2,
+            position = 4,
             section = overtimePanelSection
     )
     default int overtimePanelFontSize()
@@ -164,8 +192,8 @@ public interface RogueChestsFcConfig extends Config
     @ConfigItem(
             keyName = "overtimePanelFontColor",
             name = "Font color",
-            description = "Set the color of names and timers displayed in the overtime panel",
-            position = 3,
+            description = "Set the font color used by the overtime panel",
+            position = 5,
             section = overtimePanelSection
     )
     default Color overtimePanelFontColor()
@@ -178,40 +206,12 @@ public interface RogueChestsFcConfig extends Config
             keyName = "overtimePanelBackgroundColor",
             name = "Background color",
             description = "Set the overtime panel background color and transparency",
-            position = 4,
+            position = 6,
             section = overtimePanelSection
     )
     default Color overtimePanelBackgroundColor()
     {
         return new Color(0, 0, 0, 150);
-    }
-
-    @Range(
-            min = 1,
-            max = 60
-    )
-    @ConfigItem(
-            keyName = "overtimeMinutes",
-            name = "Time limit",
-            description = "Minutes a nearby FC member may remain before appearing in the overtime panel",
-            position = 5,
-            section = overtimePanelSection
-    )
-    default int overtimeMinutes()
-    {
-        return 15;
-    }
-
-    @ConfigItem(
-            keyName = "showOvertimeNotification",
-            name = "Chat notification",
-            description = "Show a one-time chat message when a nearby FC member exceeds the time limit",
-            position = 6,
-            section = overtimePanelSection
-    )
-    default boolean showOvertimeNotification()
-    {
-        return true;
     }
 
     @ConfigItem(
@@ -243,6 +243,17 @@ public interface RogueChestsFcConfig extends Config
             hidden = true
     )
     default String capturedNearbyNames()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "overtimeWhitelistNames",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default String overtimeWhitelistNames()
     {
         return "";
     }

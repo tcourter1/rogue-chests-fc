@@ -71,6 +71,8 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String BANNED_NAMES_KEY = "bannedNames";
 	private static final String CAPTURED_NEARBY_NAMES_KEY =
 			"capturedNearbyNames";
+	private static final String OVERTIME_WHITELIST_NAMES_KEY =
+			"overtimeWhitelistNames";
 
 	private static final String IGNORE_MENU_OPTION =
 			"Plugin ignore";
@@ -148,13 +150,13 @@ public class RogueChestsFcPlugin extends Plugin
 	private final Set<String> currentMembers =
 			ConcurrentHashMap.newKeySet();
 
-	private final Map<String, Instant> nearbyMemberStartTimes =
+	private static final Duration OVERTIME_RENDER_GRACE_PERIOD =
+			Duration.ofSeconds(90);
+
+	private final Map<String, NearbyMemberTracker> nearbyMemberTrackers =
 			new ConcurrentHashMap<>();
 
-	private final Map<String, String> nearbyMemberDisplayNames =
-			new ConcurrentHashMap<>();
-
-	private final Set<String> overtimeNotificationsSent =
+	private final Set<String> overtimeTrackingSuppressedUntilExit =
 			ConcurrentHashMap.newKeySet();
 
 	private final Set<String> pendingLookups =
@@ -508,6 +510,13 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
+	List<String> getOvertimeWhitelistPlayerNames()
+	{
+		return getConfiguredPlayerNames(
+				config.overtimeWhitelistNames()
+		);
+	}
+
 	void addIgnoredNames(String names)
 	{
 		addConfiguredNames(
@@ -526,6 +535,23 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
+	void addOvertimeWhitelistNames(String names)
+	{
+		addConfiguredNames(
+				OVERTIME_WHITELIST_NAMES_KEY,
+				config.overtimeWhitelistNames(),
+				names
+		);
+
+		parseConfiguredNames(names).forEach(normalizedName ->
+		{
+			removeNearbyMemberTracking(normalizedName);
+			overtimeTrackingSuppressedUntilExit.remove(
+					normalizedName
+			);
+		});
+	}
+
 	void removeIgnoredName(String playerName)
 	{
 		removeConfiguredName(
@@ -542,6 +568,26 @@ public class RogueChestsFcPlugin extends Plugin
 				config.bannedNames(),
 				playerName
 		);
+	}
+
+	void removeOvertimeWhitelistName(String playerName)
+	{
+		String normalizedName =
+				normalizeName(playerName);
+
+		removeConfiguredName(
+				OVERTIME_WHITELIST_NAMES_KEY,
+				config.overtimeWhitelistNames(),
+				playerName
+		);
+
+		if (!normalizedName.isEmpty())
+		{
+			removeNearbyMemberTracking(normalizedName);
+			overtimeTrackingSuppressedUntilExit.add(
+					normalizedName
+			);
+		}
 	}
 
 	void removeCapturedNearbyName(String playerName)
@@ -601,6 +647,13 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		copyNamesToClipboard(
 				getCapturedNearbyPlayerNames()
+		);
+	}
+
+	void copyOvertimeWhitelistNames()
+	{
+		copyNamesToClipboard(
+				getOvertimeWhitelistPlayerNames()
 		);
 	}
 
@@ -697,6 +750,9 @@ public class RogueChestsFcPlugin extends Plugin
 		Set<String> visibleMembers =
 				new HashSet<>();
 
+		Set<String> overtimeWhitelistNames =
+				getOvertimeWhitelistNames();
+
 		for (Player player : client.getPlayers())
 		{
 			if (player == null)
@@ -721,60 +777,85 @@ public class RogueChestsFcPlugin extends Plugin
 
 			visibleMembers.add(normalizedName);
 
-			nearbyMemberStartTimes.putIfAbsent(
-					normalizedName,
-					now
-			);
+			if (overtimeWhitelistNames.contains(
+					normalizedName
+			))
+			{
+				removeNearbyMemberTracking(normalizedName);
+				overtimeTrackingSuppressedUntilExit.remove(
+						normalizedName
+				);
+				continue;
+			}
 
-			nearbyMemberDisplayNames.put(
-					normalizedName,
+			if (overtimeTrackingSuppressedUntilExit.contains(
+					normalizedName
+			))
+			{
+				removeNearbyMemberTracking(normalizedName);
+				continue;
+			}
+
+			NearbyMemberTracker tracker =
+					nearbyMemberTrackers.computeIfAbsent(
+							normalizedName,
+							ignored -> new NearbyMemberTracker(
+									Text.toJagexName(playerName),
+									now
+							)
+					);
+
+			tracker.setDisplayName(
 					Text.toJagexName(playerName)
 			);
+			tracker.resume(now);
 
-			Instant startTime =
-					nearbyMemberStartTimes.get(
-							normalizedName
-					);
+			Duration elapsed = tracker.getElapsed(now);
 
-			Duration elapsed =
-					Duration.between(
-							startTime,
-							now
-					);
-
-			if (elapsed.compareTo(threshold) >= 0)
+			if (elapsed.compareTo(threshold) >= 0
+					&& config.showOvertimeNotification()
+					&& tracker.markNotificationSent())
 			{
-				if (config.showOvertimeNotification()
-						&& overtimeNotificationsSent.add(
-						normalizedName
-				))
-				{
-					showOvertimeNotification(
-							playerName,
-							config.overtimeMinutes()
-					);
-				}
-			}
-			else
-			{
-				overtimeNotificationsSent.remove(
-						normalizedName
+				showOvertimeNotification(
+						playerName,
+						config.overtimeMinutes()
 				);
 			}
 		}
 
-		for (String normalizedName
+		overtimeTrackingSuppressedUntilExit.removeIf(
+				normalizedName ->
+						!visibleMembers.contains(
+								normalizedName
+						)
+		);
+
+		for (Map.Entry<String, NearbyMemberTracker> entry
 				: new ArrayList<>(
-				nearbyMemberStartTimes.keySet()
+				nearbyMemberTrackers.entrySet()
 		))
 		{
-			if (!visibleMembers.contains(
-					normalizedName
-			))
+			String normalizedName = entry.getKey();
+			NearbyMemberTracker tracker = entry.getValue();
+
+			if (!currentMembers.contains(normalizedName))
 			{
-				removeNearbyMemberTracking(
-						normalizedName
-				);
+				removeNearbyMemberTracking(normalizedName);
+				continue;
+			}
+
+			if (visibleMembers.contains(normalizedName))
+			{
+				continue;
+			}
+
+			tracker.pause(now);
+
+			if (tracker.getPausedDuration(now).compareTo(
+					OVERTIME_RENDER_GRACE_PERIOD
+			) >= 0)
+			{
+				removeNearbyMemberTracking(normalizedName);
 			}
 		}
 	}
@@ -813,24 +894,13 @@ public class RogueChestsFcPlugin extends Plugin
 	private void removeNearbyMemberTracking(
 			String normalizedName)
 	{
-		nearbyMemberStartTimes.remove(
-				normalizedName
-		);
-
-		nearbyMemberDisplayNames.remove(
-				normalizedName
-		);
-
-		overtimeNotificationsSent.remove(
-				normalizedName
-		);
+		nearbyMemberTrackers.remove(normalizedName);
 	}
 
 	private void clearNearbyMemberTracking()
 	{
-		nearbyMemberStartTimes.clear();
-		nearbyMemberDisplayNames.clear();
-		overtimeNotificationsSent.clear();
+		nearbyMemberTrackers.clear();
+		overtimeTrackingSuppressedUntilExit.clear();
 	}
 
 	private boolean isInFriendsChat()
@@ -876,10 +946,15 @@ public class RogueChestsFcPlugin extends Plugin
 						)
 				);
 
+		boolean refreshFriendsChat =
+				!OVERTIME_WHITELIST_NAMES_KEY.equals(
+						configKey
+				);
+
 		saveConfiguredNames(
 				configKey,
 				namesByNormalizedName,
-				true
+				refreshFriendsChat
 		);
 	}
 
@@ -910,6 +985,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 		boolean refreshFriendsChat =
 				!CAPTURED_NEARBY_NAMES_KEY.equals(
+						configKey
+				)
+						&& !OVERTIME_WHITELIST_NAMES_KEY.equals(
 						configKey
 				);
 
@@ -1729,39 +1807,35 @@ public class RogueChestsFcPlugin extends Plugin
 		List<OvertimeMember> members =
 				new ArrayList<>();
 
-		for (Map.Entry<String, Instant> entry
-				: nearbyMemberStartTimes.entrySet())
+		Set<String> overtimeWhitelistNames =
+				getOvertimeWhitelistNames();
+
+		for (Map.Entry<String, NearbyMemberTracker> entry
+				: nearbyMemberTrackers.entrySet())
 		{
 			String normalizedName = entry.getKey();
+			NearbyMemberTracker tracker = entry.getValue();
 
-			if (!currentMembers.contains(
+			if (!currentMembers.contains(normalizedName)
+					|| overtimeWhitelistNames.contains(
 					normalizedName
 			))
 			{
 				continue;
 			}
 
-			Duration elapsed =
-					Duration.between(
-							entry.getValue(),
-							now
-					);
+			Duration elapsed = tracker.getElapsed(now);
 
 			if (elapsed.compareTo(threshold) < 0)
 			{
 				continue;
 			}
 
-			String displayName =
-					nearbyMemberDisplayNames.getOrDefault(
-							normalizedName,
-							normalizedName
-					);
-
 			members.add(
 					new OvertimeMember(
-							displayName,
-							elapsed
+							tracker.getDisplayName(),
+							elapsed,
+							tracker.isPaused()
 					)
 			);
 		}
@@ -1827,6 +1901,13 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		return parseConfiguredNames(
 				config.bannedNames()
+		);
+	}
+
+	private Set<String> getOvertimeWhitelistNames()
+	{
+		return parseConfiguredNames(
+				config.overtimeWhitelistNames()
 		);
 	}
 
@@ -2228,17 +2309,114 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 	}
 
+	private static class NearbyMemberTracker
+	{
+		private String displayName;
+		private Instant activeSince;
+		private Duration accumulatedActiveTime = Duration.ZERO;
+		private Instant pausedAt;
+		private boolean notificationSent;
+
+		NearbyMemberTracker(
+				String displayName,
+				Instant activeSince)
+		{
+			this.displayName = displayName;
+			this.activeSince = activeSince;
+		}
+
+		String getDisplayName()
+		{
+			return displayName;
+		}
+
+		void setDisplayName(String displayName)
+		{
+			this.displayName = displayName;
+		}
+
+		void pause(Instant now)
+		{
+			if (pausedAt != null)
+			{
+				return;
+			}
+
+			accumulatedActiveTime =
+					accumulatedActiveTime.plus(
+							Duration.between(
+									activeSince,
+									now
+							)
+					);
+			pausedAt = now;
+			activeSince = null;
+		}
+
+		void resume(Instant now)
+		{
+			if (pausedAt == null)
+			{
+				return;
+			}
+
+			pausedAt = null;
+			activeSince = now;
+		}
+
+		Duration getElapsed(Instant now)
+		{
+			if (pausedAt != null || activeSince == null)
+			{
+				return accumulatedActiveTime;
+			}
+
+			return accumulatedActiveTime.plus(
+					Duration.between(activeSince, now)
+			);
+		}
+
+		Duration getPausedDuration(Instant now)
+		{
+			if (pausedAt == null)
+			{
+				return Duration.ZERO;
+			}
+
+			return Duration.between(pausedAt, now);
+		}
+
+		boolean isPaused()
+		{
+			return pausedAt != null;
+		}
+
+		boolean markNotificationSent()
+		{
+			if (notificationSent)
+			{
+				return false;
+			}
+
+			notificationSent = true;
+			return true;
+		}
+	}
+
 	static class OvertimeMember
 	{
 		private final String name;
 		private final Duration elapsed;
+		private final boolean paused;
 
 		OvertimeMember(
 				String name,
-				Duration elapsed)
+				Duration elapsed,
+				boolean paused)
 		{
 			this.name = name;
 			this.elapsed = elapsed;
+			this.paused = paused;
 		}
 
 		String getName()
@@ -2249,6 +2427,11 @@ public class RogueChestsFcPlugin extends Plugin
 		Duration getElapsed()
 		{
 			return elapsed;
+		}
+
+		boolean isPaused()
+		{
+			return paused;
 		}
 	}
 

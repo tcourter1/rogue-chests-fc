@@ -40,10 +40,12 @@ public class RogueChestsFcPanel extends PluginPanel
 
     private final JTextArea ignoredNamesInput = new JTextArea();
     private final JTextArea bannedNamesInput = new JTextArea();
+    private final JTextArea overtimeWhitelistInput = new JTextArea();
 
     private final JPanel ignoredNamesList = new JPanel();
     private final JPanel bannedNamesList = new JPanel();
     private final JPanel capturedNearbyNamesList = new JPanel();
+    private final JPanel overtimeWhitelistList = new JPanel();
 
     @Inject
     public RogueChestsFcPanel(RogueChestsFcPlugin plugin)
@@ -68,6 +70,9 @@ public class RogueChestsFcPanel extends PluginPanel
         add(Box.createRigidArea(new Dimension(0, 14)));
 
         add(createCapturedNearbyNamesSection());
+        add(Box.createRigidArea(new Dimension(0, 14)));
+
+        add(createOvertimeWhitelistSection());
         add(Box.createRigidArea(new Dimension(0, 10)));
 
         refresh();
@@ -181,6 +186,21 @@ public class RogueChestsFcPanel extends PluginPanel
         section.add(addToBanButton);
 
         return section;
+    }
+
+    private JPanel createOvertimeWhitelistSection()
+    {
+        configureInputArea(overtimeWhitelistInput);
+        configureListPanel(overtimeWhitelistList);
+
+        return createEditableListSection(
+                "Overtime Whitelist",
+                "Whitelisted players are excluded from overtime tracking, the overtime panel, and overtime notifications.",
+                overtimeWhitelistInput,
+                overtimeWhitelistList,
+                this::addOvertimeWhitelistNames,
+                plugin::copyOvertimeWhitelistNames
+        );
     }
 
     private JPanel createEditableListSection(
@@ -520,6 +540,20 @@ public class RogueChestsFcPanel extends PluginPanel
         refresh();
     }
 
+    private void addOvertimeWhitelistNames()
+    {
+        String input = overtimeWhitelistInput.getText();
+
+        if (input == null || input.trim().isEmpty())
+        {
+            return;
+        }
+
+        plugin.addOvertimeWhitelistNames(input);
+        overtimeWhitelistInput.setText("");
+        refresh();
+    }
+
     public void refresh()
     {
         if (!SwingUtilities.isEventDispatchThread())
@@ -544,6 +578,12 @@ public class RogueChestsFcPanel extends PluginPanel
                 capturedNearbyNamesList,
                 plugin.getCapturedNearbyPlayerNames(),
                 plugin::removeCapturedNearbyName
+        );
+
+        rebuildList(
+                overtimeWhitelistList,
+                plugin.getOvertimeWhitelistPlayerNames(),
+                plugin::removeOvertimeWhitelistName
         );
 
         revalidate();
