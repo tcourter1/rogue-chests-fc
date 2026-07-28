@@ -161,11 +161,27 @@ public interface RogueChestsFcConfig extends Config
         return true;
     }
 
+    @Range(
+            min = 0,
+            max = 300
+    )
+    @ConfigItem(
+            keyName = "overtimeRenderGraceSeconds",
+            name = "Outside render grace",
+            description = "Seconds a tracked FC member may remain outside render distance before their overtime timer resets. Set to 0 to reset immediately",
+            position = 3,
+            section = overtimePanelSection
+    )
+    default int overtimeRenderGraceSeconds()
+    {
+        return 90;
+    }
+
     @ConfigItem(
             keyName = "overtimePanelFont",
             name = "Font",
             description = "Choose the font used by the overtime panel",
-            position = 3,
+            position = 4,
             section = overtimePanelSection
     )
     default PanelFont overtimePanelFont()
@@ -181,7 +197,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "overtimePanelFontSize",
             name = "Font size",
             description = "Set the font size used by the overtime panel",
-            position = 4,
+            position = 5,
             section = overtimePanelSection
     )
     default int overtimePanelFontSize()
@@ -193,7 +209,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "overtimePanelFontColor",
             name = "Font color",
             description = "Set the font color used by the overtime panel",
-            position = 5,
+            position = 6,
             section = overtimePanelSection
     )
     default Color overtimePanelFontColor()
@@ -206,7 +222,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "overtimePanelBackgroundColor",
             name = "Background color",
             description = "Set the overtime panel background color and transparency",
-            position = 6,
+            position = 7,
             section = overtimePanelSection
     )
     default Color overtimePanelBackgroundColor()

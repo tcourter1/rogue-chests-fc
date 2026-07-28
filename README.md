@@ -13,7 +13,7 @@ Utilities to assist with managing the Rogue Chests Friends Chat.
 - Copy, clear, and promote captured players directly to the ban list.
 - Automatically sorts the Friends Chat with banned players first, followed by members below 84 Thieving.
 - Tracks how long Friends Chat members remain within render distance at Rogue's Castle.
-- Optional overtime panel showing members exceeding a configurable time limit, with customizable appearance and optional chat notifications.
+- Includes an overtime tracker with configurable time limits, notifications, and an overtime whitelist for excluding regular campers.
 
 ## Under-84 Panel
 

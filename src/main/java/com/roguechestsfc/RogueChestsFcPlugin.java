@@ -150,9 +150,6 @@ public class RogueChestsFcPlugin extends Plugin
 	private final Set<String> currentMembers =
 			ConcurrentHashMap.newKeySet();
 
-	private static final Duration OVERTIME_RENDER_GRACE_PERIOD =
-			Duration.ofSeconds(90);
-
 	private final Map<String, NearbyMemberTracker> nearbyMemberTrackers =
 			new ConcurrentHashMap<>();
 
@@ -243,6 +240,8 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onFriendsChatChanged(
 			FriendsChatChanged event)
 	{
+		clearNearbyMemberTracking();
+
 		if (event.isJoined())
 		{
 			suppressJoinMessages = true;
@@ -259,7 +258,6 @@ public class RogueChestsFcPlugin extends Plugin
 			displayNames.clear();
 			currentMembers.clear();
 			lowLevelMembers.clear();
-			clearNearbyMemberTracking();
 
 			clientThread.invoke(
 					this::removeLevelsFromMemberList
@@ -747,6 +745,11 @@ public class RogueChestsFcPlugin extends Plugin
 						config.overtimeMinutes()
 				);
 
+		Duration renderGracePeriod =
+				Duration.ofSeconds(
+						config.overtimeRenderGraceSeconds()
+				);
+
 		Set<String> visibleMembers =
 				new HashSet<>();
 
@@ -852,7 +855,7 @@ public class RogueChestsFcPlugin extends Plugin
 			tracker.pause(now);
 
 			if (tracker.getPausedDuration(now).compareTo(
-					OVERTIME_RENDER_GRACE_PERIOD
+					renderGracePeriod
 			) >= 0)
 			{
 				removeNearbyMemberTracking(normalizedName);
