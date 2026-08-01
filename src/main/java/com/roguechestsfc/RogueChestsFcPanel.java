@@ -3,11 +3,14 @@ package com.roguechestsfc;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.util.List;
 import javax.inject.Inject;
 import javax.swing.BorderFactory;
@@ -111,13 +114,17 @@ public class RogueChestsFcPanel extends PluginPanel
         configureInputArea(ignoredNamesInput);
         configureListPanel(ignoredNamesList);
 
-        return createEditableListSection(
-                "Under-84 Ignore List",
+        JPanel content = createEditableListSection(
                 "Ignored players are excluded from the under-84 panel and join warnings.",
                 ignoredNamesInput,
                 ignoredNamesList,
                 this::addIgnoredNames,
                 plugin::copyIgnoredNames
+        );
+
+        return createCollapsibleSection(
+                "Under-84 Ignore List",
+                content
         );
     }
 
@@ -126,13 +133,17 @@ public class RogueChestsFcPanel extends PluginPanel
         configureInputArea(bannedNamesInput);
         configureListPanel(bannedNamesList);
 
-        return createEditableListSection(
-                "Banned Players",
+        JPanel content = createEditableListSection(
                 "Banned players are marked red with BAN and do not receive Hiscore lookups.",
                 bannedNamesInput,
                 bannedNamesList,
                 this::addBannedNames,
                 plugin::copyBannedNames
+        );
+
+        return createCollapsibleSection(
+                "Banned Players",
+                content
         );
     }
 
@@ -140,11 +151,7 @@ public class RogueChestsFcPanel extends PluginPanel
     {
         configureListPanel(capturedNearbyNamesList);
 
-        JPanel section = createSectionPanel();
-
-        JLabel title = createSectionTitle(
-                "Nearby Outsiders"
-        );
+        JPanel content = createSectionPanel();
 
         JLabel description = createSectionDescription(
                 "Automatically records players who enter render distance while you are in an FC, excluding current FC members."
@@ -177,15 +184,17 @@ public class RogueChestsFcPanel extends PluginPanel
 
         configureFullWidthButton(addToBanButton);
 
-        section.add(title);
-        section.add(description);
-        section.add(listScrollPane);
-        section.add(Box.createRigidArea(new Dimension(0, 5)));
-        section.add(actionRow);
-        section.add(Box.createRigidArea(new Dimension(0, 5)));
-        section.add(addToBanButton);
+        content.add(description);
+        content.add(listScrollPane);
+        content.add(Box.createRigidArea(new Dimension(0, 5)));
+        content.add(actionRow);
+        content.add(Box.createRigidArea(new Dimension(0, 5)));
+        content.add(addToBanButton);
 
-        return section;
+        return createCollapsibleSection(
+                "Nearby Outsiders",
+                content
+        );
     }
 
     private JPanel createOvertimeWhitelistSection()
@@ -193,18 +202,21 @@ public class RogueChestsFcPanel extends PluginPanel
         configureInputArea(overtimeWhitelistInput);
         configureListPanel(overtimeWhitelistList);
 
-        return createEditableListSection(
-                "Overtime Whitelist",
+        JPanel content = createEditableListSection(
                 "Whitelisted players are excluded from overtime tracking, the overtime panel, and overtime notifications.",
                 overtimeWhitelistInput,
                 overtimeWhitelistList,
                 this::addOvertimeWhitelistNames,
                 plugin::copyOvertimeWhitelistNames
         );
+
+        return createCollapsibleSection(
+                "Overtime Whitelist",
+                content
+        );
     }
 
     private JPanel createEditableListSection(
-            String titleText,
             String descriptionText,
             JTextArea input,
             JPanel listPanel,
@@ -212,8 +224,6 @@ public class RogueChestsFcPanel extends PluginPanel
             Runnable copyAction)
     {
         JPanel section = createSectionPanel();
-
-        JLabel title = createSectionTitle(titleText);
 
         JLabel description = createSectionDescription(
                 descriptionText
@@ -242,7 +252,6 @@ public class RogueChestsFcPanel extends PluginPanel
                 STANDARD_LIST_HEIGHT
         );
 
-        section.add(title);
         section.add(description);
         section.add(inputScrollPane);
         section.add(Box.createRigidArea(new Dimension(0, 5)));
@@ -273,17 +282,83 @@ public class RogueChestsFcPanel extends PluginPanel
         return section;
     }
 
-    private JLabel createSectionTitle(String titleText)
+    private JPanel createCollapsibleSection(
+            String titleText,
+            JPanel content)
     {
-        JLabel title = new JLabel(titleText);
+        JPanel container = new JPanel();
 
+        container.setLayout(
+                new BoxLayout(container, BoxLayout.Y_AXIS)
+        );
+        container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        container.setBorder(null);
+        container.setAlignmentX(Component.LEFT_ALIGNMENT);
+        container.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE
+                )
+        );
+
+        JPanel header = new JPanel(new BorderLayout(6, 0));
+
+        header.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+        header.setBorder(new EmptyBorder(6, 7, 6, 7));
+        header.setAlignmentX(Component.LEFT_ALIGNMENT);
+        header.setCursor(
+                Cursor.getPredefinedCursor(
+                        Cursor.HAND_CURSOR
+                )
+        );
+        header.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        30
+                )
+        );
+
+        JLabel arrow = new JLabel("▼");
+        arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+
+        JLabel title = new JLabel(titleText);
         title.setForeground(ColorScheme.BRAND_ORANGE);
         title.setFont(
                 title.getFont().deriveFont(Font.BOLD)
         );
-        title.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        return title;
+        header.add(arrow, BorderLayout.WEST);
+        header.add(title, BorderLayout.CENTER);
+
+        MouseAdapter toggleListener = new MouseAdapter()
+        {
+            @Override
+            public void mouseClicked(MouseEvent event)
+            {
+                boolean expanded = content.isVisible();
+
+                content.setVisible(!expanded);
+                arrow.setText(expanded ? "▶" : "▼");
+
+                container.revalidate();
+                container.repaint();
+
+                RogueChestsFcPanel.this.revalidate();
+                RogueChestsFcPanel.this.repaint();
+            }
+        };
+
+        header.addMouseListener(toggleListener);
+        arrow.addMouseListener(toggleListener);
+        title.addMouseListener(toggleListener);
+
+        content.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        container.add(header);
+        container.add(Box.createRigidArea(new Dimension(0, 6)));
+        container.add(content);
+
+        return container;
     }
 
     private JLabel createSectionDescription(
