@@ -24,6 +24,7 @@ import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
 import net.runelite.api.FriendsChatManager;
 import net.runelite.api.FriendsChatMember;
+import net.runelite.api.FriendsChatRank;
 import net.runelite.api.GameState;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
@@ -44,6 +45,7 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.WorldService;
 import net.runelite.client.hiscore.HiscoreClient;
 import net.runelite.client.hiscore.HiscoreEndpoint;
 import net.runelite.client.hiscore.HiscoreResult;
@@ -56,6 +58,9 @@ import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
+import net.runelite.http.api.worlds.World;
+import net.runelite.http.api.worlds.WorldResult;
+import net.runelite.http.api.worlds.WorldType;
 
 @Slf4j
 @PluginDescriptor(
@@ -71,6 +76,8 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String BANNED_NAMES_KEY = "bannedNames";
 	private static final String CAPTURED_NEARBY_NAMES_KEY =
 			"capturedNearbyNames";
+	private static final String CAPTURED_NEARBY_NAME_TIMES_KEY =
+			"capturedNearbyNameTimes";
 	private static final String OVERTIME_WHITELIST_NAMES_KEY =
 			"overtimeWhitelistNames";
 
@@ -99,6 +106,7 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String RED_TEXT_OPEN = "<col=ff0000>";
 	private static final String TEXT_CLOSE = "</col>";
 	private static final String BANNED_MEMBER_TEXT = " BAN";
+	private static final String F2P_MEMBER_TEXT = " F2P";
 
 	@Inject
 	private Client client;
@@ -108,6 +116,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 	@Inject
 	private HiscoreClient hiscoreClient;
+
+	@Inject
+	private WorldService worldService;
 
 	@Inject
 	private OverlayManager overlayManager;
@@ -148,6 +159,9 @@ public class RogueChestsFcPlugin extends Plugin
 			new ConcurrentHashMap<>();
 
 	private final Set<String> currentMembers =
+			ConcurrentHashMap.newKeySet();
+
+	private final Set<String> unrankedF2pMembers =
 			ConcurrentHashMap.newKeySet();
 
 	private final Map<String, NearbyMemberTracker> nearbyMemberTrackers =
@@ -227,7 +241,9 @@ public class RogueChestsFcPlugin extends Plugin
 		thievingLevels.clear();
 		lowLevelMembers.clear();
 		currentMembers.clear();
+		unrankedF2pMembers.clear();
 		clearNearbyMemberTracking();
+		clearCapturedNearbyNames();
 
 		suppressJoinMessages = true;
 
@@ -257,6 +273,7 @@ public class RogueChestsFcPlugin extends Plugin
 			pendingJoinMessages.clear();
 			displayNames.clear();
 			currentMembers.clear();
+			unrankedF2pMembers.clear();
 			lowLevelMembers.clear();
 
 			clientThread.invoke(
@@ -288,6 +305,9 @@ public class RogueChestsFcPlugin extends Plugin
 		currentMembers.add(normalizedName);
 		removeCapturedNearbyName(playerName);
 
+		boolean unrankedF2p =
+				updateF2pMemberState(member);
+
 		LowLevelMember lowLevelMember =
 				lowLevelMembers.get(normalizedName);
 
@@ -298,6 +318,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (isBannedPlayer(playerName))
 		{
+			unrankedF2pMembers.remove(normalizedName);
 			cancelLookup(normalizedName);
 			thievingLevels.remove(normalizedName);
 			lowLevelMembers.remove(normalizedName);
@@ -316,6 +337,19 @@ public class RogueChestsFcPlugin extends Plugin
 			);
 
 			return;
+		}
+
+		if (unrankedF2p
+				&& config.showF2pJoinMessage()
+				&& !getIgnoredNames().contains(
+				normalizedName
+		))
+		{
+			showJoinNotification(
+					normalizedName,
+					playerName,
+					"(Unranked F2P)"
+			);
 		}
 
 		if (shouldQueueJoinMessage(normalizedName))
@@ -353,6 +387,7 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizeName(member.getName());
 
 		currentMembers.remove(normalizedName);
+		unrankedF2pMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
 		removeNearbyMemberTracking(normalizedName);
 
@@ -419,6 +454,8 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		removeExpiredDepartedMembers();
+		removeExpiredCapturedNearbyNames();
+		refreshF2pMemberStates();
 		updateNearbyMemberTracking();
 	}
 
@@ -590,10 +627,17 @@ public class RogueChestsFcPlugin extends Plugin
 
 	void removeCapturedNearbyName(String playerName)
 	{
+		String normalizedName =
+				normalizeName(playerName);
+
 		removeConfiguredName(
 				CAPTURED_NEARBY_NAMES_KEY,
 				config.capturedNearbyNames(),
 				playerName
+		);
+
+		removeCapturedNearbyTimestamp(
+				normalizedName
 		);
 	}
 
@@ -602,6 +646,12 @@ public class RogueChestsFcPlugin extends Plugin
 		configManager.setConfiguration(
 				CONFIG_GROUP,
 				CAPTURED_NEARBY_NAMES_KEY,
+				""
+		);
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				CAPTURED_NEARBY_NAME_TIMES_KEY,
 				""
 		);
 
@@ -685,6 +735,249 @@ public class RogueChestsFcPlugin extends Plugin
 				CAPTURED_NEARBY_NAMES_KEY,
 				capturedNames,
 				false
+		);
+
+		saveCapturedNearbyTimestamp(
+				normalizedName,
+				Instant.now()
+		);
+	}
+
+	private void removeExpiredCapturedNearbyNames()
+	{
+		Map<String, String> capturedNames =
+				getConfiguredPlayerNameMap(
+						config.capturedNearbyNames()
+				);
+
+		if (capturedNames.isEmpty())
+		{
+			if (!config.capturedNearbyNameTimes()
+					.trim().isEmpty())
+			{
+				configManager.setConfiguration(
+						CONFIG_GROUP,
+						CAPTURED_NEARBY_NAME_TIMES_KEY,
+						""
+				);
+			}
+
+			return;
+		}
+
+		Map<String, Instant> timestamps =
+				getCapturedNearbyTimestamps();
+
+		Instant now = Instant.now();
+		Duration retention =
+				Duration.ofMinutes(
+						config.nearbyOutsiderRetentionMinutes()
+				);
+
+		boolean namesChanged = false;
+		boolean timestampsChanged = false;
+
+		for (String normalizedName
+				: new ArrayList<>(
+				capturedNames.keySet()
+		))
+		{
+			Instant capturedAt =
+					timestamps.get(normalizedName);
+
+			if (capturedAt == null)
+			{
+				timestamps.put(
+						normalizedName,
+						now
+				);
+				timestampsChanged = true;
+				continue;
+			}
+
+			if (Duration.between(
+					capturedAt,
+					now
+			).compareTo(retention) >= 0)
+			{
+				capturedNames.remove(normalizedName);
+				timestamps.remove(normalizedName);
+				namesChanged = true;
+				timestampsChanged = true;
+			}
+		}
+
+		for (String normalizedName
+				: new ArrayList<>(
+				timestamps.keySet()
+		))
+		{
+			if (!capturedNames.containsKey(
+					normalizedName
+			))
+			{
+				timestamps.remove(normalizedName);
+				timestampsChanged = true;
+			}
+		}
+
+		if (namesChanged)
+		{
+			saveConfiguredNames(
+					CAPTURED_NEARBY_NAMES_KEY,
+					capturedNames,
+					false
+			);
+		}
+
+		if (timestampsChanged)
+		{
+			saveCapturedNearbyTimestamps(
+					timestamps
+			);
+		}
+	}
+
+	private void saveCapturedNearbyTimestamp(
+			String normalizedName,
+			Instant capturedAt)
+	{
+		if (normalizedName.isEmpty()
+				|| capturedAt == null)
+		{
+			return;
+		}
+
+		Map<String, Instant> timestamps =
+				getCapturedNearbyTimestamps();
+
+		timestamps.put(
+				normalizedName,
+				capturedAt
+		);
+
+		saveCapturedNearbyTimestamps(
+				timestamps
+		);
+	}
+
+	private void removeCapturedNearbyTimestamp(
+			String normalizedName)
+	{
+		if (normalizedName.isEmpty())
+		{
+			return;
+		}
+
+		Map<String, Instant> timestamps =
+				getCapturedNearbyTimestamps();
+
+		if (timestamps.remove(
+				normalizedName
+		) != null)
+		{
+			saveCapturedNearbyTimestamps(
+					timestamps
+			);
+		}
+	}
+
+	private Map<String, Instant>
+	getCapturedNearbyTimestamps()
+	{
+		Map<String, Instant> timestamps =
+				new TreeMap<>();
+
+		String configuredTimes =
+				config.capturedNearbyNameTimes();
+
+		if (configuredTimes == null
+				|| configuredTimes.trim().isEmpty())
+		{
+			return timestamps;
+		}
+
+		Arrays.stream(
+						configuredTimes.split(
+								"[\r\n]+"
+						)
+				)
+				.map(String::trim)
+				.filter(line -> !line.isEmpty())
+				.forEach(line ->
+				{
+					int separatorIndex =
+							line.lastIndexOf('|');
+
+					if (separatorIndex <= 0
+							|| separatorIndex
+							>= line.length() - 1)
+					{
+						return;
+					}
+
+					String normalizedName =
+							normalizeName(
+									line.substring(
+											0,
+											separatorIndex
+									)
+							);
+
+					if (normalizedName.isEmpty())
+					{
+						return;
+					}
+
+					try
+					{
+						long epochMilli =
+								Long.parseLong(
+										line.substring(
+												separatorIndex + 1
+										)
+								);
+
+						timestamps.put(
+								normalizedName,
+								Instant.ofEpochMilli(
+										epochMilli
+								)
+						);
+					}
+					catch (NumberFormatException ignored)
+					{
+						// Ignore malformed timestamp entries.
+					}
+				});
+
+		return timestamps;
+	}
+
+	private void saveCapturedNearbyTimestamps(
+			Map<String, Instant> timestamps)
+	{
+		List<String> lines =
+				new ArrayList<>();
+
+		for (Map.Entry<String, Instant> entry
+				: timestamps.entrySet())
+		{
+			lines.add(
+					entry.getKey()
+							+ "|"
+							+ entry.getValue()
+							.toEpochMilli()
+			);
+		}
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				CAPTURED_NEARBY_NAME_TIMES_KEY,
+				String.join(
+						"\n",
+						lines
+				)
 		);
 	}
 
@@ -1096,6 +1389,18 @@ public class RogueChestsFcPlugin extends Plugin
 					capturedNames,
 					false
 			);
+
+			Map<String, Instant> timestamps =
+					getCapturedNearbyTimestamps();
+
+			for (String normalizedName : memberNames)
+			{
+				timestamps.remove(normalizedName);
+			}
+
+			saveCapturedNearbyTimestamps(
+					timestamps
+			);
 		}
 	}
 
@@ -1183,6 +1488,9 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizedName
 		)
 				|| getBannedNames().contains(
+				normalizedName
+		)
+				|| unrankedF2pMembers.contains(
 				normalizedName
 		))
 		{
@@ -1283,11 +1591,17 @@ public class RogueChestsFcPlugin extends Plugin
 				loadedMembers.add(normalizedName);
 				currentMembers.add(normalizedName);
 
+				boolean unrankedF2p =
+						updateF2pMemberState(member);
+
 				boolean bannedPlayer =
 						isBannedPlayer(playerName);
 
 				if (bannedPlayer)
 				{
+					unrankedF2pMembers.remove(
+							normalizedName
+					);
 					cancelLookup(normalizedName);
 					thievingLevels.remove(
 							normalizedName
@@ -1305,6 +1619,20 @@ public class RogueChestsFcPlugin extends Plugin
 								"(Banned player)"
 						);
 					}
+				}
+
+				if (unrankedF2p
+						&& !bannedPlayer
+						&& config.showF2pJoinMessage()
+						&& !getIgnoredNames().contains(
+						normalizedName
+				))
+				{
+					showJoinNotification(
+							normalizedName,
+							playerName,
+							"(Unranked F2P)"
+					);
 				}
 
 				LowLevelMember lowLevelMember =
@@ -1521,7 +1849,10 @@ public class RogueChestsFcPlugin extends Plugin
 				level
 		);
 
-		if (level < REQUIRED_THIEVING_LEVEL)
+		if (level < REQUIRED_THIEVING_LEVEL
+				|| unrankedF2pMembers.contains(
+				normalizedName
+		))
 		{
 			Instant departedAt =
 					currentMembers.contains(
@@ -1588,6 +1919,9 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizedName
 		)
 				|| getBannedNames().contains(
+				normalizedName
+		)
+				|| unrankedF2pMembers.contains(
 				normalizedName
 		)
 				|| !currentMembers.contains(
@@ -1676,6 +2010,219 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
+	private void refreshF2pMemberStates()
+	{
+		FriendsChatManager friendsChatManager =
+				client.getFriendsChatManager();
+
+		if (friendsChatManager == null)
+		{
+			unrankedF2pMembers.clear();
+			return;
+		}
+
+		FriendsChatMember[] members =
+				friendsChatManager.getMembers();
+
+		if (members == null)
+		{
+			return;
+		}
+
+		Set<String> refreshedNames =
+				new HashSet<>();
+
+		for (FriendsChatMember member : members)
+		{
+			if (member == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(
+							member.getName()
+					);
+
+			if (normalizedName.isEmpty()
+					|| isBannedPlayer(
+					member.getName()
+			))
+			{
+				continue;
+			}
+
+			if (isUnrankedF2p(member))
+			{
+				refreshedNames.add(normalizedName);
+			}
+		}
+
+		for (String normalizedName
+				: new HashSet<>(
+				unrankedF2pMembers
+		))
+		{
+			if (!refreshedNames.contains(
+					normalizedName
+			))
+			{
+				unrankedF2pMembers.remove(
+						normalizedName
+				);
+
+				Integer level =
+						thievingLevels.get(
+								normalizedName
+						);
+
+				if (level == null
+						|| level
+						>= REQUIRED_THIEVING_LEVEL)
+				{
+					lowLevelMembers.remove(
+							normalizedName
+					);
+				}
+			}
+		}
+
+		for (FriendsChatMember member : members)
+		{
+			if (member == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(
+							member.getName()
+					);
+
+			if (refreshedNames.contains(
+					normalizedName
+			))
+			{
+				updateF2pMemberState(member);
+			}
+		}
+	}
+
+	private boolean updateF2pMemberState(
+			FriendsChatMember member)
+	{
+		if (member == null)
+		{
+			return false;
+		}
+
+		String playerName = member.getName();
+		String normalizedName =
+				normalizeName(playerName);
+
+		if (normalizedName.isEmpty())
+		{
+			return false;
+		}
+
+		boolean unrankedF2p =
+				isUnrankedF2p(member);
+
+		if (unrankedF2p)
+		{
+			unrankedF2pMembers.add(
+					normalizedName
+			);
+
+			lowLevelMembers.compute(
+					normalizedName,
+					(key, existing) ->
+					{
+						if (existing == null)
+						{
+							return new LowLevelMember(
+									Text.toJagexName(
+											playerName
+									),
+									currentMembers.contains(
+											normalizedName
+									)
+											? null
+											: Instant.now()
+							);
+						}
+
+						existing.setName(
+								Text.toJagexName(
+										playerName
+								)
+						);
+
+						if (currentMembers.contains(
+								normalizedName
+						))
+						{
+							existing.setDepartedAt(
+									null
+							);
+						}
+
+						return existing;
+					});
+		}
+		else
+		{
+			unrankedF2pMembers.remove(
+					normalizedName
+			);
+
+			Integer level =
+					thievingLevels.get(
+							normalizedName
+					);
+
+			if (level == null
+					|| level
+					>= REQUIRED_THIEVING_LEVEL)
+			{
+				lowLevelMembers.remove(
+						normalizedName
+				);
+			}
+		}
+
+		return unrankedF2p;
+	}
+
+	private boolean isUnrankedF2p(
+			FriendsChatMember member)
+	{
+		if (member == null
+				|| member.getRank()
+				!= FriendsChatRank.UNRANKED)
+		{
+			return false;
+		}
+
+		WorldResult worlds =
+				worldService.getWorlds();
+
+		if (worlds == null)
+		{
+			return false;
+		}
+
+		World world =
+				worlds.findWorld(
+						member.getWorld()
+				);
+
+		return world != null
+				&& !world.getTypes().contains(
+				WorldType.MEMBERS
+		);
+	}
+
 	private void updateLowLevelMemberFromCache(
 			String normalizedName,
 			String playerName)
@@ -1690,9 +2237,18 @@ public class RogueChestsFcPlugin extends Plugin
 						normalizedName
 				);
 
-		if (level == null
-				|| level
-				>= REQUIRED_THIEVING_LEVEL)
+		boolean unrankedF2p =
+				unrankedF2pMembers.contains(
+						normalizedName
+				);
+
+		if (level == null && !unrankedF2p)
+		{
+			return;
+		}
+
+		if (!unrankedF2p
+				&& level >= REQUIRED_THIEVING_LEVEL)
 		{
 			return;
 		}
@@ -2033,6 +2589,27 @@ public class RogueChestsFcPlugin extends Plugin
 				continue;
 			}
 
+			if (unrankedF2pMembers.contains(
+					normalizedName
+			))
+			{
+				String f2pColorOpen =
+						ignoredNames.contains(
+								normalizedName
+						)
+								? "<col=00ff00>"
+								: RED_TEXT_OPEN;
+
+				nameWidget.setText(
+						f2pColorOpen
+								+ originalText
+								+ F2P_MEMBER_TEXT
+								+ TEXT_CLOSE
+				);
+
+				continue;
+			}
+
 			Integer thievingLevel =
 					thievingLevels.get(
 							normalizedName
@@ -2080,6 +2657,16 @@ public class RogueChestsFcPlugin extends Plugin
 			return 0;
 		}
 
+		if (unrankedF2pMembers.contains(
+				normalizedName
+		)
+				&& !ignoredNames.contains(
+				normalizedName
+		))
+		{
+			return 1;
+		}
+
 		Integer thievingLevel =
 				thievingLevels.get(normalizedName);
 
@@ -2087,10 +2674,10 @@ public class RogueChestsFcPlugin extends Plugin
 				&& thievingLevel < REQUIRED_THIEVING_LEVEL
 				&& !ignoredNames.contains(normalizedName))
 		{
-			return 1;
+			return 2;
 		}
 
-		return 2;
+		return 3;
 	}
 
 	private List<Widget> getRowWidgets(
@@ -2205,6 +2792,16 @@ public class RogueChestsFcPlugin extends Plugin
 					0,
 					plainText.length()
 							- BANNED_MEMBER_TEXT.length()
+			);
+		}
+		else if (plainText.endsWith(
+				F2P_MEMBER_TEXT
+		))
+		{
+			plainText = plainText.substring(
+					0,
+					plainText.length()
+							- F2P_MEMBER_TEXT.length()
 			);
 		}
 

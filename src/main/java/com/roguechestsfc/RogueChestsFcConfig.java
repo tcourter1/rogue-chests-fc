@@ -26,9 +26,16 @@ public interface RogueChestsFcConfig extends Config
     String lowLevelPanelSection = "lowLevelPanelSection";
 
     @ConfigSection(
+            name = "Nearby Outsiders",
+            description = "Settings for automatically captured nearby non-FC players",
+            position = 2
+    )
+    String nearbyOutsidersSection = "nearbyOutsidersSection";
+
+    @ConfigSection(
             name = "Overtime Panel",
             description = "Settings for tracking FC members who remain nearby too long",
-            position = 2
+            position = 3
     )
     String overtimePanelSection = "overtimePanelSection";
 
@@ -52,6 +59,18 @@ public interface RogueChestsFcConfig extends Config
             section = generalSection
     )
     default boolean showBannedJoinMessage()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "showF2pJoinMessage",
+            name = "F2P join message",
+            description = "Show a chat message when an unranked player joins the Friends Chat from a free-to-play world",
+            position = 2,
+            section = generalSection
+    )
+    default boolean showF2pJoinMessage()
     {
         return true;
     }
@@ -119,6 +138,22 @@ public interface RogueChestsFcConfig extends Config
     default Color panelBackgroundColor()
     {
         return new Color(0, 0, 0, 150);
+    }
+
+    @Range(
+            min = 1,
+            max = 120
+    )
+    @ConfigItem(
+            keyName = "nearbyOutsiderRetentionMinutes",
+            name = "Clear after",
+            description = "Minutes a captured nearby outsider remains in the side-panel list before being removed automatically",
+            position = 0,
+            section = nearbyOutsidersSection
+    )
+    default int nearbyOutsiderRetentionMinutes()
+    {
+        return 10;
     }
 
     @ConfigItem(
@@ -259,6 +294,17 @@ public interface RogueChestsFcConfig extends Config
             hidden = true
     )
     default String capturedNearbyNames()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "capturedNearbyNameTimes",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default String capturedNearbyNameTimes()
     {
         return "";
     }
