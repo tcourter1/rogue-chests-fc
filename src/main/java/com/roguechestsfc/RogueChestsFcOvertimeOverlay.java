@@ -16,7 +16,7 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 
 public class RogueChestsFcOvertimeOverlay extends OverlayPanel
 {
-    private static final String TITLE = "Over 15 Minutes";
+    private static final String TITLE = "Overtime Tracker";
     private static final int PANEL_PADDING = 20;
     private static final int MINIMUM_WIDTH = 140;
 
@@ -69,9 +69,16 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
 
         int width = titleMetrics.stringWidth(TITLE);
 
-        for (RogueChestsFcPlugin.OvertimeMember member : members)
+        String[] formattedElapsed =
+                new String[members.size()];
+
+        for (int i = 0; i < members.size(); i++)
         {
+            RogueChestsFcPlugin.OvertimeMember member =
+                    members.get(i);
+
             String elapsed = format(member.getElapsed());
+            formattedElapsed[i] = elapsed;
 
             FontMetrics memberMetrics =
                     member.isPaused()
@@ -116,8 +123,11 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
                         .build()
         );
 
-        for (RogueChestsFcPlugin.OvertimeMember member : members)
+        for (int i = 0; i < members.size(); i++)
         {
+            RogueChestsFcPlugin.OvertimeMember member =
+                    members.get(i);
+
             Font memberFont =
                     member.isPaused()
                             ? pausedFont
@@ -126,7 +136,7 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
             panelComponent.getChildren().add(
                     LineComponent.builder()
                             .left(member.getName())
-                            .right(format(member.getElapsed()))
+                            .right(formattedElapsed[i])
                             .leftFont(memberFont)
                             .rightFont(memberFont)
                             .leftColor(
@@ -162,12 +172,24 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
 
     private static String format(Duration duration)
     {
-        long seconds = duration.getSeconds();
+        long totalSeconds = duration.getSeconds();
+        long minutes = totalSeconds / 60;
+        long seconds = totalSeconds % 60;
 
-        return String.format(
-                "%02d:%02d",
-                seconds / 60,
-                seconds % 60
-        );
+        StringBuilder result = new StringBuilder(5);
+
+        if (minutes < 10)
+        {
+            result.append('0');
+        }
+
+        result.append(minutes).append(':');
+
+        if (seconds < 10)
+        {
+            result.append('0');
+        }
+
+        return result.append(seconds).toString();
     }
 }

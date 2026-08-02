@@ -1,7 +1,6 @@
 package com.roguechestsfc;
 
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
@@ -333,7 +332,7 @@ public class RogueChestsFcPanel extends PluginPanel
         MouseAdapter toggleListener = new MouseAdapter()
         {
             @Override
-            public void mouseClicked(MouseEvent event)
+            public void mouseClicked(MouseEvent ignored)
             {
                 boolean expanded = content.isVisible();
 
@@ -472,9 +471,6 @@ public class RogueChestsFcPanel extends PluginPanel
 
         styleScrollBar(scrollPane.getVerticalScrollBar());
         styleScrollBar(scrollPane.getHorizontalScrollBar());
-
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
     }
 
     private void styleScrollBar(JScrollBar scrollBar)
@@ -537,7 +533,7 @@ public class RogueChestsFcPanel extends PluginPanel
 
         button.setFocusable(false);
         button.addActionListener(
-                event -> action.run()
+                ignored -> action.run()
         );
 
         return button;
@@ -772,7 +768,7 @@ public class RogueChestsFcPanel extends PluginPanel
                 new java.awt.Insets(1, 5, 1, 5)
         );
 
-        removeButton.addActionListener(event ->
+        removeButton.addActionListener(ignored ->
         {
             removalAction.remove(playerName);
             refresh();

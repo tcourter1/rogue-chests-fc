@@ -76,6 +76,34 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "showMissingEquipmentWarning",
+            name = "Equipment warning",
+            description = "Show a warning when a nearby FC member has too many empty visible equipment slots",
+            position = 3,
+            section = generalSection
+    )
+    default boolean showMissingEquipmentWarning()
+    {
+        return true;
+    }
+
+    @Range(
+            min = 1,
+            max = 9
+    )
+    @ConfigItem(
+            keyName = "missingEquipmentThreshold",
+            name = "Missing item threshold",
+            description = "Number of empty visible equipment slots required to trigger a warning",
+            position = 4,
+            section = generalSection
+    )
+    default int missingEquipmentThreshold()
+    {
+        return 1;
+    }
+
+    @ConfigItem(
             keyName = "showLowLevelPanel",
             name = "Show panel",
             description = "Show FC members with less than 84 Thieving",
@@ -197,7 +225,7 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @Range(
-            min = 0,
+            min = 1,
             max = 300
     )
     @ConfigItem(
@@ -209,7 +237,7 @@ public interface RogueChestsFcConfig extends Config
     )
     default int overtimeRenderGraceSeconds()
     {
-        return 90;
+        return 45;
     }
 
     @ConfigItem(

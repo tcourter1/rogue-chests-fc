@@ -26,9 +26,11 @@ import net.runelite.api.FriendsChatManager;
 import net.runelite.api.FriendsChatMember;
 import net.runelite.api.FriendsChatRank;
 import net.runelite.api.GameState;
+import net.runelite.api.ItemComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
+import net.runelite.api.PlayerComposition;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.FriendsChatChanged;
 import net.runelite.api.events.FriendsChatMemberJoined;
@@ -40,11 +42,15 @@ import net.runelite.api.events.PlayerSpawned;
 import net.runelite.api.events.PostClientTick;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.kit.KitType;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageBuilder;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.game.ItemEquipmentStats;
+import net.runelite.client.game.ItemManager;
+import net.runelite.client.game.ItemStats;
 import net.runelite.client.game.WorldService;
 import net.runelite.client.hiscore.HiscoreClient;
 import net.runelite.client.hiscore.HiscoreEndpoint;
@@ -63,6 +69,7 @@ import net.runelite.http.api.worlds.WorldResult;
 import net.runelite.http.api.worlds.WorldType;
 
 @Slf4j
+@SuppressWarnings("unused")
 @PluginDescriptor(
 		name = "Rogue Chests FC",
 		description = "Contains utilities to help manage the Rogue Chests friends chat.",
@@ -96,6 +103,48 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final int LOOKUPS_PER_TICK = 5;
 	private static final int REQUIRED_THIEVING_LEVEL = 84;
 
+	private static final KitType[] VISIBLE_EQUIPMENT_SLOTS =
+			{
+					KitType.HEAD,
+					KitType.CAPE,
+					KitType.AMULET,
+					KitType.TORSO,
+					KitType.LEGS,
+					KitType.HANDS,
+					KitType.BOOTS,
+					KitType.WEAPON,
+					KitType.SHIELD
+			};
+
+	private static final String[] TWO_HANDED_WEAPON_NAME_MARKERS =
+			{
+					"2h sword",
+					"godsword",
+					"halberd",
+					"spear",
+					"warspear",
+					"maul",
+					"ballista",
+					"shortbow",
+					"longbow",
+					"composite bow",
+					"crystal bow",
+					"dark bow",
+					"twisted bow",
+					"bow of faerdhinen",
+					"seercull",
+					"scythe",
+					"bulwark",
+					"colossal blade",
+					"barrelchest anchor",
+					"soulreaper axe",
+					"dharok's greataxe",
+					"torag's hammers",
+					"karil's crossbow",
+					"eclipse atlatl",
+					"toxic blowpipe"
+			};
+
 	private static final String GREEN_LEVEL_MARKER =
 			" <col=00ff00>";
 
@@ -119,6 +168,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 	@Inject
 	private WorldService worldService;
+
+	@Inject
+	private ItemManager itemManager;
 
 	@Inject
 	private OverlayManager overlayManager;
@@ -168,6 +220,9 @@ public class RogueChestsFcPlugin extends Plugin
 			new ConcurrentHashMap<>();
 
 	private final Set<String> overtimeTrackingSuppressedUntilExit =
+			ConcurrentHashMap.newKeySet();
+
+	private final Set<String> equipmentScannedVisibleMembers =
 			ConcurrentHashMap.newKeySet();
 
 	private final Set<String> pendingLookups =
@@ -243,6 +298,7 @@ public class RogueChestsFcPlugin extends Plugin
 		currentMembers.clear();
 		unrankedF2pMembers.clear();
 		clearNearbyMemberTracking();
+		equipmentScannedVisibleMembers.clear();
 		clearCapturedNearbyNames();
 
 		suppressJoinMessages = true;
@@ -275,6 +331,7 @@ public class RogueChestsFcPlugin extends Plugin
 			currentMembers.clear();
 			unrankedF2pMembers.clear();
 			lowLevelMembers.clear();
+			equipmentScannedVisibleMembers.clear();
 
 			clientThread.invoke(
 					this::removeLevelsFromMemberList
@@ -389,6 +446,7 @@ public class RogueChestsFcPlugin extends Plugin
 		currentMembers.remove(normalizedName);
 		unrankedF2pMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
+		equipmentScannedVisibleMembers.remove(normalizedName);
 		removeNearbyMemberTracking(normalizedName);
 
 		LowLevelMember lowLevelMember =
@@ -405,7 +463,7 @@ public class RogueChestsFcPlugin extends Plugin
 	@Subscribe
 	public void onPlayerSpawned(PlayerSpawned event)
 	{
-		if (!isInFriendsChat() || !isInRoguesCastleRegion())
+		if (!canTrackNearbyMembers())
 		{
 			return;
 		}
@@ -420,6 +478,11 @@ public class RogueChestsFcPlugin extends Plugin
 
 		String playerName = player.getName();
 		String localPlayerName = localPlayer.getName();
+
+		if (playerName == null || localPlayerName == null)
+		{
+			return;
+		}
 
 		String normalizedName =
 				normalizeName(playerName);
@@ -438,7 +501,7 @@ public class RogueChestsFcPlugin extends Plugin
 	}
 
 	@Subscribe
-	public void onGameTick(GameTick event)
+	public void onGameTick(GameTick ignored)
 	{
 		for (int i = 0; i < LOOKUPS_PER_TICK; i++)
 		{
@@ -455,7 +518,6 @@ public class RogueChestsFcPlugin extends Plugin
 
 		removeExpiredDepartedMembers();
 		removeExpiredCapturedNearbyNames();
-		refreshF2pMemberStates();
 		updateNearbyMemberTracking();
 	}
 
@@ -466,12 +528,13 @@ public class RogueChestsFcPlugin extends Plugin
 		if (event.getGameState() != GameState.LOGGED_IN)
 		{
 			clearNearbyMemberTracking();
+			equipmentScannedVisibleMembers.clear();
 		}
 	}
 
 	@Subscribe(priority = Float.NEGATIVE_INFINITY)
 	public void onPostClientTick(
-			PostClientTick event)
+			PostClientTick ignored)
 	{
 		applyLevelsToMemberList();
 	}
@@ -483,6 +546,7 @@ public class RogueChestsFcPlugin extends Plugin
 		if (event.getScriptId()
 				== ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD)
 		{
+			refreshF2pMemberStates();
 			applyLevelsToMemberList();
 		}
 	}
@@ -512,7 +576,8 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		client.createMenuEntry(1)
+		client.getMenu()
+				.createMenuEntry(1)
 				.setOption(IGNORE_MENU_OPTION)
 				.setTarget(
 						"<col=ff9040>"
@@ -1014,10 +1079,10 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private void updateNearbyMemberTracking()
 	{
-		if (!isInFriendsChat()
-				|| !isInRoguesCastleRegion())
+		if (!canTrackNearbyMembers())
 		{
 			clearNearbyMemberTracking();
+			equipmentScannedVisibleMembers.clear();
 			return;
 		}
 
@@ -1026,6 +1091,7 @@ public class RogueChestsFcPlugin extends Plugin
 		if (localPlayer == null)
 		{
 			clearNearbyMemberTracking();
+			equipmentScannedVisibleMembers.clear();
 			return;
 		}
 
@@ -1057,6 +1123,12 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			String playerName = player.getName();
+
+			if (playerName == null)
+			{
+				continue;
+			}
+
 			String normalizedName =
 					normalizeName(playerName);
 
@@ -1072,6 +1144,12 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			visibleMembers.add(normalizedName);
+
+			scanEquipmentIfNeeded(
+					player,
+					normalizedName,
+					playerName
+			);
 
 			if (overtimeWhitelistNames.contains(
 					normalizedName
@@ -1126,6 +1204,13 @@ public class RogueChestsFcPlugin extends Plugin
 						)
 		);
 
+		equipmentScannedVisibleMembers.removeIf(
+				normalizedName ->
+						!visibleMembers.contains(
+								normalizedName
+						)
+		);
+
 		for (Map.Entry<String, NearbyMemberTracker> entry
 				: new ArrayList<>(
 				nearbyMemberTrackers.entrySet()
@@ -1154,6 +1239,190 @@ public class RogueChestsFcPlugin extends Plugin
 				removeNearbyMemberTracking(normalizedName);
 			}
 		}
+	}
+
+	private void scanEquipmentIfNeeded(
+			Player player,
+			String normalizedName,
+			String playerName)
+	{
+		if (!config.showMissingEquipmentWarning()
+				|| equipmentScannedVisibleMembers.contains(
+				normalizedName
+		))
+		{
+			return;
+		}
+
+		PlayerComposition composition =
+				player.getPlayerComposition();
+
+		if (composition == null)
+		{
+			return;
+		}
+
+		equipmentScannedVisibleMembers.add(
+				normalizedName
+		);
+
+		int missingSlots =
+				countMissingVisibleEquipment(
+						composition
+				);
+
+		if (missingSlots
+				>= config.missingEquipmentThreshold())
+		{
+			showMissingEquipmentNotification(
+					playerName,
+					missingSlots
+			);
+		}
+	}
+
+	private int countMissingVisibleEquipment(
+			PlayerComposition composition)
+	{
+		int[] equipmentIds =
+				composition.getEquipmentIds();
+
+		if (equipmentIds == null
+				|| equipmentIds.length == 0)
+		{
+			return VISIBLE_EQUIPMENT_SLOTS.length;
+		}
+
+		int weaponId =
+				getEquippedItemId(
+						equipmentIds,
+						KitType.WEAPON
+				);
+
+		boolean twoHandedWeapon =
+				isTwoHandedWeapon(weaponId);
+
+		int missingSlots = 0;
+
+		for (KitType slot : VISIBLE_EQUIPMENT_SLOTS)
+		{
+			if (slot == KitType.SHIELD
+					&& twoHandedWeapon)
+			{
+				continue;
+			}
+
+			if (getEquippedItemId(
+					equipmentIds,
+					slot
+			) < 0)
+			{
+				missingSlots++;
+			}
+		}
+
+		return missingSlots;
+	}
+
+	private int getEquippedItemId(
+			int[] equipmentIds,
+			KitType slot)
+	{
+		int slotIndex = slot.getIndex();
+
+		if (slotIndex < 0
+				|| slotIndex >= equipmentIds.length)
+		{
+			return -1;
+		}
+
+		int encodedId = equipmentIds[slotIndex];
+
+		return encodedId >= PlayerComposition.ITEM_OFFSET
+				? encodedId - PlayerComposition.ITEM_OFFSET
+				: -1;
+	}
+
+	private boolean isTwoHandedWeapon(int weaponId)
+	{
+		if (weaponId < 0)
+		{
+			return false;
+		}
+
+		ItemStats itemStats =
+				itemManager.getItemStats(weaponId);
+
+		if (itemStats != null)
+		{
+			ItemEquipmentStats equipmentStats =
+					itemStats.getEquipment();
+
+			if (equipmentStats != null
+					&& equipmentStats.isTwoHanded())
+			{
+				return true;
+			}
+		}
+
+		ItemComposition itemComposition =
+				itemManager.getItemComposition(weaponId);
+
+		if (itemComposition == null
+				|| itemComposition.getName() == null)
+		{
+			return false;
+		}
+
+		String weaponName =
+				itemComposition.getName()
+						.toLowerCase(Locale.ROOT);
+
+		for (String marker
+				: TWO_HANDED_WEAPON_NAME_MARKERS)
+		{
+			if (weaponName.contains(marker))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private void showMissingEquipmentNotification(
+			String playerName,
+			int missingSlots)
+	{
+		String itemText =
+				missingSlots == 1
+						? " item"
+						: " items";
+
+		String message =
+				new ChatMessageBuilder()
+						.append(
+								Color.RED,
+								Text.toJagexName(
+										playerName
+								)
+						)
+						.append(" is missing ")
+						.append(
+								Color.RED,
+								missingSlots + itemText
+						)
+						.append(
+								" from visible equipment slots."
+						)
+						.build();
+
+		client.addChatMessage(
+				ChatMessageType.GAMEMESSAGE,
+				"",
+				message,
+				""
+		);
 	}
 
 	private void showOvertimeNotification(
@@ -1199,13 +1468,13 @@ public class RogueChestsFcPlugin extends Plugin
 		overtimeTrackingSuppressedUntilExit.clear();
 	}
 
-	private boolean isInFriendsChat()
+	private boolean canTrackNearbyMembers()
 	{
-		return client.getFriendsChatManager() != null;
-	}
+		if (client.getFriendsChatManager() == null)
+		{
+			return false;
+		}
 
-	private boolean isInRoguesCastleRegion()
-	{
 		Player localPlayer = client.getLocalPlayer();
 
 		return localPlayer != null
@@ -2039,20 +2308,17 @@ public class RogueChestsFcPlugin extends Plugin
 				continue;
 			}
 
+			String playerName = member.getName();
 			String normalizedName =
-					normalizeName(
-							member.getName()
-					);
+					normalizeName(playerName);
 
 			if (normalizedName.isEmpty()
-					|| isBannedPlayer(
-					member.getName()
-			))
+					|| isBannedPlayer(playerName))
 			{
 				continue;
 			}
 
-			if (isUnrankedF2p(member))
+			if (updateF2pMemberState(member))
 			{
 				refreshedNames.add(normalizedName);
 			}
@@ -2063,47 +2329,29 @@ public class RogueChestsFcPlugin extends Plugin
 				unrankedF2pMembers
 		))
 		{
-			if (!refreshedNames.contains(
-					normalizedName
-			))
-			{
-				unrankedF2pMembers.remove(
-						normalizedName
-				);
-
-				Integer level =
-						thievingLevels.get(
-								normalizedName
-						);
-
-				if (level == null
-						|| level
-						>= REQUIRED_THIEVING_LEVEL)
-				{
-					lowLevelMembers.remove(
-							normalizedName
-					);
-				}
-			}
-		}
-
-		for (FriendsChatMember member : members)
-		{
-			if (member == null)
-			{
-				continue;
-			}
-
-			String normalizedName =
-					normalizeName(
-							member.getName()
-					);
-
 			if (refreshedNames.contains(
 					normalizedName
 			))
 			{
-				updateF2pMemberState(member);
+				continue;
+			}
+
+			unrankedF2pMembers.remove(
+					normalizedName
+			);
+
+			Integer level =
+					thievingLevels.get(
+							normalizedName
+					);
+
+			if (level == null
+					|| level
+					>= REQUIRED_THIEVING_LEVEL)
+			{
+				lowLevelMembers.remove(
+						normalizedName
+				);
 			}
 		}
 	}
@@ -2351,8 +2599,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 	List<OvertimeMember> getOvertimeMembers()
 	{
-		if (!isInFriendsChat()
-				|| !isInRoguesCastleRegion())
+		if (!canTrackNearbyMembers())
 		{
 			return new ArrayList<>();
 		}
