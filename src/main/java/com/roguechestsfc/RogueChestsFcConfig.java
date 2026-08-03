@@ -39,6 +39,13 @@ public interface RogueChestsFcConfig extends Config
     )
     String overtimePanelSection = "overtimePanelSection";
 
+    @ConfigSection(
+            name = "Equipment Inspection",
+            description = "Settings for checking nearby FC members for missing visible equipment",
+            position = 4
+    )
+    String equipmentInspectionSection = "equipmentInspectionSection";
+
     @ConfigItem(
             keyName = "showLowLevelJoinMessage",
             name = "Join message",
@@ -73,34 +80,6 @@ public interface RogueChestsFcConfig extends Config
     default boolean showF2pJoinMessage()
     {
         return true;
-    }
-
-    @ConfigItem(
-            keyName = "showMissingEquipmentWarning",
-            name = "Equipment warning",
-            description = "Show a warning when a nearby FC member has too many empty visible equipment slots",
-            position = 3,
-            section = generalSection
-    )
-    default boolean showMissingEquipmentWarning()
-    {
-        return true;
-    }
-
-    @Range(
-            min = 1,
-            max = 9
-    )
-    @ConfigItem(
-            keyName = "missingEquipmentThreshold",
-            name = "Missing item threshold",
-            description = "Number of empty visible equipment slots required to trigger a warning",
-            position = 4,
-            section = generalSection
-    )
-    default int missingEquipmentThreshold()
-    {
-        return 1;
     }
 
     @ConfigItem(
@@ -291,6 +270,46 @@ public interface RogueChestsFcConfig extends Config
     default Color overtimePanelBackgroundColor()
     {
         return new Color(0, 0, 0, 150);
+    }
+
+    @ConfigItem(
+            keyName = "showMissingEquipmentWarning",
+            name = "Equipment warning",
+            description = "Show a warning when a nearby FC member has too many empty visible equipment slots",
+            position = 0,
+            section = equipmentInspectionSection
+    )
+    default boolean showMissingEquipmentWarning()
+    {
+        return true;
+    }
+
+    @Range(
+            min = 1,
+            max = 9
+    )
+    @ConfigItem(
+            keyName = "missingEquipmentThreshold",
+            name = "Missing item threshold",
+            description = "Number of empty visible equipment slots required to trigger a warning",
+            position = 1,
+            section = equipmentInspectionSection
+    )
+    default int missingEquipmentThreshold()
+    {
+        return 1;
+    }
+
+    @ConfigItem(
+            keyName = "equipmentInspectionIgnoredNames",
+            name = "Ignore list",
+            description = "Players excluded from equipment inspection. Separate names with commas or new lines",
+            position = 2,
+            section = equipmentInspectionSection
+    )
+    default String equipmentInspectionIgnoredNames()
+    {
+        return "";
     }
 
     @ConfigItem(

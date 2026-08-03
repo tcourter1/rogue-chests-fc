@@ -15,7 +15,7 @@ Utilities to assist with managing the Rogue Chests Friends Chat.
 - Tracks how long Friends Chat members remain within render distance at Rogue's Castle.
 - Includes an overtime tracker with configurable time limits, notifications, and an overtime whitelist for excluding regular campers.
 - Detects unranked free-to-play FC members with configurable warnings and highlights.
-- Warns when nearby Friends Chat members are missing configurable amounts of visible equipment.
+- Warns when nearby Friends Chat members are missing configurable amounts of visible equipment. 2.5.1 adds ignore list for this feature.
 
 ## Under-84 Panel
 

@@ -1247,6 +1247,9 @@ public class RogueChestsFcPlugin extends Plugin
 			String playerName)
 	{
 		if (!config.showMissingEquipmentWarning()
+				|| getEquipmentInspectionIgnoredNames().contains(
+				normalizedName
+		)
 				|| equipmentScannedVisibleMembers.contains(
 				normalizedName
 		))
@@ -2714,6 +2717,13 @@ public class RogueChestsFcPlugin extends Plugin
 	{
 		return parseConfiguredNames(
 				config.overtimeWhitelistNames()
+		);
+	}
+
+	private Set<String> getEquipmentInspectionIgnoredNames()
+	{
+		return parseConfiguredNames(
+				config.equipmentInspectionIgnoredNames()
 		);
 	}
 
