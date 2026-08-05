@@ -7,10 +7,10 @@ import java.awt.Graphics2D;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.client.ui.FontManager;
+import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.client.ui.overlay.components.LineComponent;
 
 public class RogueChestsFcOverlay extends OverlayPanel
@@ -33,7 +33,7 @@ public class RogueChestsFcOverlay extends OverlayPanel
         this.config = config;
 
         setPosition(OverlayPosition.TOP_LEFT);
-        setPriority(OverlayPriority.HIGHEST);
+        setPriority(Overlay.PRIORITY_HIGHEST);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
     }
 

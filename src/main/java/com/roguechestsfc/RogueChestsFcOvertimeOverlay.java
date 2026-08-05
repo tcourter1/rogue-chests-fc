@@ -8,10 +8,10 @@ import java.time.Duration;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.client.ui.FontManager;
+import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
-import net.runelite.client.ui.overlay.OverlayPriority;
 import net.runelite.client.ui.overlay.components.LineComponent;
 
 public class RogueChestsFcOvertimeOverlay extends OverlayPanel
@@ -34,7 +34,7 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
         this.config = config;
 
         setPosition(OverlayPosition.TOP_LEFT);
-        setPriority(OverlayPriority.HIGH);
+        setPriority(Overlay.PRIORITY_HIGHEST);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
     }
 
