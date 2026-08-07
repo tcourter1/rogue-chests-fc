@@ -41,3 +41,4 @@ The plugin sidebar provides quick management tools for Friends Chat moderation:
 - Copy names to your clipboard with a single click
 - Add captured players directly to the ban list
 - Remove individual players or clear captured lists as needed
+- Clear all and Search options for the Banned players list

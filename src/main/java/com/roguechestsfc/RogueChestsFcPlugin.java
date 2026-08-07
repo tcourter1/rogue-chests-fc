@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -234,6 +235,22 @@ public class RogueChestsFcPlugin extends Plugin
 	private final ConcurrentLinkedQueue<String> lookupQueue =
 			new ConcurrentLinkedQueue<>();
 
+	private volatile String cachedIgnoredNamesSource;
+	private volatile Set<String> cachedIgnoredNames =
+			Collections.emptySet();
+
+	private volatile String cachedBannedNamesSource;
+	private volatile Set<String> cachedBannedNames =
+			Collections.emptySet();
+
+	private volatile String cachedOvertimeWhitelistSource;
+	private volatile Set<String> cachedOvertimeWhitelistNames =
+			Collections.emptySet();
+
+	private volatile String cachedEquipmentIgnoreSource;
+	private volatile Set<String> cachedEquipmentInspectionIgnoredNames =
+			Collections.emptySet();
+
 	private volatile boolean suppressJoinMessages = true;
 
 	@Provides
@@ -248,6 +265,8 @@ public class RogueChestsFcPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		refreshConfiguredNameCaches();
+
 		overlayManager.add(overlay);
 		overlayManager.add(overtimeOverlay);
 
@@ -667,6 +686,15 @@ public class RogueChestsFcPlugin extends Plugin
 				BANNED_NAMES_KEY,
 				config.bannedNames(),
 				playerName
+		);
+	}
+
+	void clearBannedNames()
+	{
+		saveConfiguredNames(
+				BANNED_NAMES_KEY,
+				new TreeMap<>(),
+				true
 		);
 	}
 
@@ -2701,30 +2729,109 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private Set<String> getIgnoredNames()
 	{
-		return parseConfiguredNames(
-				config.ignoredNames()
-		);
+		String source = config.ignoredNames();
+
+		if (!sameConfiguredValue(
+				source,
+				cachedIgnoredNamesSource
+		))
+		{
+			cachedIgnoredNames =
+					parseConfiguredNames(source);
+			cachedIgnoredNamesSource = source;
+		}
+
+		return cachedIgnoredNames;
 	}
 
 	private Set<String> getBannedNames()
 	{
-		return parseConfiguredNames(
-				config.bannedNames()
-		);
+		String source = config.bannedNames();
+
+		if (!sameConfiguredValue(
+				source,
+				cachedBannedNamesSource
+		))
+		{
+			cachedBannedNames =
+					parseConfiguredNames(source);
+			cachedBannedNamesSource = source;
+		}
+
+		return cachedBannedNames;
 	}
 
 	private Set<String> getOvertimeWhitelistNames()
 	{
-		return parseConfiguredNames(
-				config.overtimeWhitelistNames()
-		);
+		String source = config.overtimeWhitelistNames();
+
+		if (!sameConfiguredValue(
+				source,
+				cachedOvertimeWhitelistSource
+		))
+		{
+			cachedOvertimeWhitelistNames =
+					parseConfiguredNames(source);
+			cachedOvertimeWhitelistSource = source;
+		}
+
+		return cachedOvertimeWhitelistNames;
 	}
 
 	private Set<String> getEquipmentInspectionIgnoredNames()
 	{
-		return parseConfiguredNames(
-				config.equipmentInspectionIgnoredNames()
-		);
+		String source =
+				config.equipmentInspectionIgnoredNames();
+
+		if (!sameConfiguredValue(
+				source,
+				cachedEquipmentIgnoreSource
+		))
+		{
+			cachedEquipmentInspectionIgnoredNames =
+					parseConfiguredNames(source);
+			cachedEquipmentIgnoreSource = source;
+		}
+
+		return cachedEquipmentInspectionIgnoredNames;
+	}
+
+	private void refreshConfiguredNameCaches()
+	{
+		cachedIgnoredNamesSource = config.ignoredNames();
+		cachedIgnoredNames =
+				parseConfiguredNames(
+						cachedIgnoredNamesSource
+				);
+
+		cachedBannedNamesSource = config.bannedNames();
+		cachedBannedNames =
+				parseConfiguredNames(
+						cachedBannedNamesSource
+				);
+
+		cachedOvertimeWhitelistSource =
+				config.overtimeWhitelistNames();
+		cachedOvertimeWhitelistNames =
+				parseConfiguredNames(
+						cachedOvertimeWhitelistSource
+				);
+
+		cachedEquipmentIgnoreSource =
+				config.equipmentInspectionIgnoredNames();
+		cachedEquipmentInspectionIgnoredNames =
+				parseConfiguredNames(
+						cachedEquipmentIgnoreSource
+				);
+	}
+
+	private boolean sameConfiguredValue(
+			String first,
+			String second)
+	{
+		return first == null
+				? second == null
+				: first.equals(second);
 	}
 
 	private Set<String> parseConfiguredNames(

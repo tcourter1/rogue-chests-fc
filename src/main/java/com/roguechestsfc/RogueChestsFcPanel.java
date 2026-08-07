@@ -10,7 +10,9 @@ import java.awt.GridLayout;
 import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import javax.inject.Inject;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -18,6 +20,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
@@ -26,6 +29,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.plaf.basic.BasicScrollBarUI;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
@@ -38,7 +42,23 @@ public class RogueChestsFcPanel extends PluginPanel
     private static final int BUTTON_HEIGHT = 30;
     private static final int SCROLLBAR_SIZE = 7;
 
+    private static final String CONFIG_GROUP = "roguechestsfc";
+    private static final String COLLAPSED_KEY_PREFIX =
+            "panelCollapsed.";
+
+    private static final String IGNORED_SECTION_KEY =
+            "under84Ignore";
+    private static final String BANNED_SECTION_KEY =
+            "bannedPlayers";
+    private static final String CAPTURED_SECTION_KEY =
+            "nearbyOutsiders";
+    private static final String OVERTIME_SECTION_KEY =
+            "overtimeWhitelist";
+
     private final RogueChestsFcPlugin plugin;
+    private final ConfigManager configManager;
+
+    private String bannedSearchQuery = "";
 
     private final JTextArea ignoredNamesInput = new JTextArea();
     private final JTextArea bannedNamesInput = new JTextArea();
@@ -50,11 +70,14 @@ public class RogueChestsFcPanel extends PluginPanel
     private final JPanel overtimeWhitelistList = new JPanel();
 
     @Inject
-    public RogueChestsFcPanel(RogueChestsFcPlugin plugin)
+    public RogueChestsFcPanel(
+            RogueChestsFcPlugin plugin,
+            ConfigManager configManager)
     {
         super();
 
         this.plugin = plugin;
+        this.configManager = configManager;
 
         styleScrollPane(getScrollPane());
 
@@ -122,6 +145,7 @@ public class RogueChestsFcPanel extends PluginPanel
         );
 
         return createCollapsibleSection(
+                IGNORED_SECTION_KEY,
                 "Under-84 Ignore List",
                 content
         );
@@ -132,15 +156,61 @@ public class RogueChestsFcPanel extends PluginPanel
         configureInputArea(bannedNamesInput);
         configureListPanel(bannedNamesList);
 
-        JPanel content = createEditableListSection(
-                "Banned players are marked red with BAN and do not receive Hiscore lookups.",
-                bannedNamesInput,
-                bannedNamesList,
-                this::addBannedNames,
+        JPanel content = createSectionPanel();
+
+        JLabel description = createSectionDescription(
+                "Banned players are marked red with BAN and do not receive Hiscore lookups."
+        );
+
+        JScrollPane inputScrollPane =
+                createInputScrollPane(bannedNamesInput);
+
+        JButton addButton = createButton(
+                "Add Players",
+                this::addBannedNames
+        );
+
+        JButton searchButton = createButton(
+                "Search",
+                this::searchBannedNames
+        );
+
+        JButton copyButton = createButton(
+                "Copy All",
                 plugin::copyBannedNames
         );
 
+        JButton clearAllButton = createButton(
+                "Clear All",
+                this::confirmClearBannedNames
+        );
+
+        JPanel firstActionRow = createButtonRow(
+                addButton,
+                searchButton
+        );
+
+        JPanel secondActionRow = createButtonRow(
+                copyButton,
+                clearAllButton
+        );
+
+        JScrollPane listScrollPane = createListScrollPane(
+                bannedNamesList,
+                STANDARD_LIST_HEIGHT
+        );
+
+        content.add(description);
+        content.add(inputScrollPane);
+        content.add(Box.createRigidArea(new Dimension(0, 5)));
+        content.add(firstActionRow);
+        content.add(Box.createRigidArea(new Dimension(0, 5)));
+        content.add(secondActionRow);
+        content.add(Box.createRigidArea(new Dimension(0, 7)));
+        content.add(listScrollPane);
+
         return createCollapsibleSection(
+                BANNED_SECTION_KEY,
                 "Banned Players",
                 content
         );
@@ -191,6 +261,7 @@ public class RogueChestsFcPanel extends PluginPanel
         content.add(addToBanButton);
 
         return createCollapsibleSection(
+                CAPTURED_SECTION_KEY,
                 "Nearby Outsiders",
                 content
         );
@@ -210,6 +281,7 @@ public class RogueChestsFcPanel extends PluginPanel
         );
 
         return createCollapsibleSection(
+                OVERTIME_SECTION_KEY,
                 "Overtime Whitelist",
                 content
         );
@@ -282,6 +354,7 @@ public class RogueChestsFcPanel extends PluginPanel
     }
 
     private JPanel createCollapsibleSection(
+            String sectionKey,
             String titleText,
             JPanel content)
     {
@@ -317,7 +390,12 @@ public class RogueChestsFcPanel extends PluginPanel
                 )
         );
 
-        JLabel arrow = new JLabel("▼");
+        boolean collapsed =
+                isSectionCollapsed(sectionKey);
+
+        JLabel arrow = new JLabel(
+                collapsed ? "▶" : "▼"
+        );
         arrow.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 
         JLabel title = new JLabel(titleText);
@@ -329,15 +407,28 @@ public class RogueChestsFcPanel extends PluginPanel
         header.add(arrow, BorderLayout.WEST);
         header.add(title, BorderLayout.CENTER);
 
+        Component spacer =
+                Box.createRigidArea(new Dimension(0, 6));
+
+        content.setVisible(!collapsed);
+        spacer.setVisible(!collapsed);
+
         MouseAdapter toggleListener = new MouseAdapter()
         {
             @Override
             public void mouseClicked(MouseEvent ignored)
             {
                 boolean expanded = content.isVisible();
+                boolean collapsedNow = expanded;
 
                 content.setVisible(!expanded);
+                spacer.setVisible(!expanded);
                 arrow.setText(expanded ? "▶" : "▼");
+
+                saveSectionCollapsed(
+                        sectionKey,
+                        collapsedNow
+                );
 
                 container.revalidate();
                 container.repaint();
@@ -354,10 +445,32 @@ public class RogueChestsFcPanel extends PluginPanel
         content.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         container.add(header);
-        container.add(Box.createRigidArea(new Dimension(0, 6)));
+        container.add(spacer);
         container.add(content);
 
         return container;
+    }
+
+    private boolean isSectionCollapsed(
+            String sectionKey)
+    {
+        String value = configManager.getConfiguration(
+                CONFIG_GROUP,
+                COLLAPSED_KEY_PREFIX + sectionKey
+        );
+
+        return Boolean.parseBoolean(value);
+    }
+
+    private void saveSectionCollapsed(
+            String sectionKey,
+            boolean collapsed)
+    {
+        configManager.setConfiguration(
+                CONFIG_GROUP,
+                COLLAPSED_KEY_PREFIX + sectionKey,
+                collapsed
+        );
     }
 
     private JLabel createSectionDescription(
@@ -608,7 +721,45 @@ public class RogueChestsFcPanel extends PluginPanel
 
         plugin.addBannedNames(input);
         bannedNamesInput.setText("");
+        bannedSearchQuery = "";
         refresh();
+    }
+
+    private void searchBannedNames()
+    {
+        String input = bannedNamesInput.getText();
+
+        bannedSearchQuery =
+                input == null
+                        ? ""
+                        : input.trim();
+
+        refreshBannedList();
+    }
+
+    private void confirmClearBannedNames()
+    {
+        if (plugin.getBannedPlayerNames().isEmpty())
+        {
+            return;
+        }
+
+        int result = JOptionPane.showConfirmDialog(
+                this,
+                "Are you sure you want to clear the entire banned players list?",
+                "Clear Banned Players",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE
+        );
+
+        if (result != JOptionPane.YES_OPTION)
+        {
+            return;
+        }
+
+        bannedSearchQuery = "";
+        bannedNamesInput.setText("");
+        plugin.clearBannedNames();
     }
 
     private void addOvertimeWhitelistNames()
@@ -639,11 +790,7 @@ public class RogueChestsFcPanel extends PluginPanel
                 plugin::removeIgnoredName
         );
 
-        rebuildList(
-                bannedNamesList,
-                plugin.getBannedPlayerNames(),
-                plugin::removeBannedName
-        );
+        refreshBannedList();
 
         rebuildList(
                 capturedNearbyNamesList,
@@ -659,6 +806,39 @@ public class RogueChestsFcPanel extends PluginPanel
 
         revalidate();
         repaint();
+    }
+
+    private void refreshBannedList()
+    {
+        List<String> bannedNames =
+                plugin.getBannedPlayerNames();
+
+        String normalizedQuery =
+                bannedSearchQuery.trim()
+                        .toLowerCase(Locale.ROOT);
+
+        if (!normalizedQuery.isEmpty())
+        {
+            List<String> filteredNames =
+                    new ArrayList<>();
+
+            for (String name : bannedNames)
+            {
+                if (name.toLowerCase(Locale.ROOT)
+                        .contains(normalizedQuery))
+                {
+                    filteredNames.add(name);
+                }
+            }
+
+            bannedNames = filteredNames;
+        }
+
+        rebuildList(
+                bannedNamesList,
+                bannedNames,
+                plugin::removeBannedName
+        );
     }
 
     private void rebuildList(
