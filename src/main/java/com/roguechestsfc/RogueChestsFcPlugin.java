@@ -5,9 +5,13 @@ import java.awt.Color;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.awt.image.BufferedImage;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -19,6 +23,11 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import javax.crypto.Cipher;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
@@ -58,6 +67,7 @@ import net.runelite.client.hiscore.HiscoreEndpoint;
 import net.runelite.client.hiscore.HiscoreResult;
 import net.runelite.client.hiscore.HiscoreSkill;
 import net.runelite.client.hiscore.Skill;
+import net.runelite.client.party.PartyService;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -80,6 +90,8 @@ public class RogueChestsFcPlugin extends Plugin
 {
 	private static final String CONFIG_GROUP = "roguechestsfc";
 	private static final int ROGUES_CASTLE_REGION_ID = 13117;
+	private static final int FEROX_ENCLAVE_WEST_REGION_ID = 12344;
+	private static final int FEROX_ENCLAVE_EAST_REGION_ID = 12600;
 	private static final String IGNORED_NAMES_KEY = "ignoredNames";
 	private static final String BANNED_NAMES_KEY = "bannedNames";
 	private static final String CAPTURED_NEARBY_NAMES_KEY =
@@ -88,6 +100,31 @@ public class RogueChestsFcPlugin extends Plugin
 			"capturedNearbyNameTimes";
 	private static final String OVERTIME_WHITELIST_NAMES_KEY =
 			"overtimeWhitelistNames";
+	private static final String PLUGIN_AUTHORIZED_KEY =
+			"pluginAuthorized";
+	private static final String PLUGIN_AUTHORIZATION_VERSION_KEY =
+			"pluginAuthorizationVersion";
+	private static final String PARTY_KEY_MATERIAL_KEY =
+			"partyKeyMaterial";
+
+	private static final String AUTH_VERSION = "v1";
+	private static final int PBKDF2_ITERATIONS = 210_000;
+	private static final int PBKDF2_KEY_LENGTH_BITS = 256;
+	private static final String PASSCODE_SALT_BASE64 =
+			"JmZfBxHllFhmOpmv4oPJDw==";
+	private static final String PASSCODE_HASH_BASE64 =
+			"KhuLOfFNZPUpyUVlqmrX+Z4jGkprFOxjpGHs6awQ8bw=";
+
+	private static final int PARTY_PBKDF2_ITERATIONS = 210_000;
+	private static final int PARTY_KEY_LENGTH_BITS = 256;
+	private static final String PARTY_KEY_SALT_BASE64 =
+			"o6jGz3myGiyA3Fd4soS2hQ==";
+	private static final String PARTY_IV_BASE64 =
+			"I9Sv9X/mfvN//A/jxLmu0Q==";
+	private static final String PARTY_CIPHERTEXT_BASE64 =
+			"xfGmG78Zf/cgnbSq7c2PJQ==";
+
+	private static final int IN_WILDERNESS_VARBIT = 5963;
 
 	private static final String IGNORE_MENU_OPTION =
 			"Plugin ignore";
@@ -194,6 +231,9 @@ public class RogueChestsFcPlugin extends Plugin
 	@Inject
 	private ClientToolbar clientToolbar;
 
+	@Inject
+	private PartyService partyService;
+
 	private NavigationButton navigationButton;
 
 	private final Map<String, Integer> thievingLevels =
@@ -252,6 +292,9 @@ public class RogueChestsFcPlugin extends Plugin
 			Collections.emptySet();
 
 	private volatile boolean suppressJoinMessages = true;
+	private volatile boolean authorizedFeaturesActive;
+	private boolean wasInWilderness;
+	private boolean partyJoinedByPlugin;
 
 	@Provides
 	RogueChestsFcConfig provideConfig(
@@ -266,9 +309,6 @@ public class RogueChestsFcPlugin extends Plugin
 	protected void startUp()
 	{
 		refreshConfiguredNameCaches();
-
-		overlayManager.add(overlay);
-		overlayManager.add(overtimeOverlay);
 
 		BufferedImage icon =
 				ImageUtil.loadImageResource(
@@ -285,17 +325,56 @@ public class RogueChestsFcPlugin extends Plugin
 
 		clientToolbar.addNavigation(navigationButton);
 
-		panel.refresh();
+		boolean authorized = isAuthorized();
+		panel.setAuthorized(authorized);
+
+		if (authorized)
+		{
+			activateAuthorizedFeatures();
+		}
+		else
+		{
+			clearNearbyMemberTracking();
+			equipmentScannedVisibleMembers.clear();
+
+			clientThread.invoke(
+					this::removeLevelsFromMemberList
+			);
+		}
+	}
+
+	private void activateAuthorizedFeatures()
+	{
+		if (authorizedFeaturesActive)
+		{
+			return;
+		}
+
+		authorizedFeaturesActive = true;
+
+		overlayManager.add(overlay);
+		overlayManager.add(overtimeOverlay);
 
 		suppressJoinMessages = true;
 		queueCurrentMembersWhenAvailable();
+
+		if (client.getGameState() == GameState.LOGGED_IN)
+		{
+			updatePartyMembership();
+		}
 	}
 
 	@Override
 	protected void shutDown()
 	{
-		overlayManager.remove(overlay);
-		overlayManager.remove(overtimeOverlay);
+		leaveManagedParty();
+
+		if (authorizedFeaturesActive)
+		{
+			overlayManager.remove(overlay);
+			overlayManager.remove(overtimeOverlay);
+			authorizedFeaturesActive = false;
+		}
 
 		if (navigationButton != null)
 		{
@@ -331,6 +410,11 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onFriendsChatChanged(
 			FriendsChatChanged event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		clearNearbyMemberTracking();
 
 		if (event.isJoined())
@@ -362,6 +446,11 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onFriendsChatMemberJoined(
 			FriendsChatMemberJoined event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		FriendsChatMember member = event.getMember();
 
 		if (member == null)
@@ -452,6 +541,11 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onFriendsChatMemberLeft(
 			FriendsChatMemberLeft event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		FriendsChatMember member = event.getMember();
 
 		if (member == null)
@@ -482,6 +576,11 @@ public class RogueChestsFcPlugin extends Plugin
 	@Subscribe
 	public void onPlayerSpawned(PlayerSpawned event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		if (!canTrackNearbyMembers())
 		{
 			return;
@@ -522,6 +621,13 @@ public class RogueChestsFcPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick ignored)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
+		updatePartyMembership();
+
 		for (int i = 0; i < LOOKUPS_PER_TICK; i++)
 		{
 			String normalizedName =
@@ -544,17 +650,33 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onGameStateChanged(
 			GameStateChanged event)
 	{
-		if (event.getGameState() != GameState.LOGGED_IN)
+		if (!authorizedFeaturesActive)
 		{
-			clearNearbyMemberTracking();
-			equipmentScannedVisibleMembers.clear();
+			return;
 		}
+
+		if (event.getGameState() == GameState.LOGGED_IN)
+		{
+			updatePartyMembership();
+			return;
+		}
+
+		leaveManagedParty();
+		wasInWilderness = false;
+
+		clearNearbyMemberTracking();
+		equipmentScannedVisibleMembers.clear();
 	}
 
 	@Subscribe(priority = Float.NEGATIVE_INFINITY)
 	public void onPostClientTick(
 			PostClientTick ignored)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		applyLevelsToMemberList();
 	}
 
@@ -562,6 +684,11 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onScriptPostFired(
 			ScriptPostFired event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		if (event.getScriptId()
 				== ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD)
 		{
@@ -573,6 +700,11 @@ public class RogueChestsFcPlugin extends Plugin
 	@Subscribe
 	public void onMenuOpened(MenuOpened event)
 	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		String playerName =
 				findFriendsChatPlayerInMenu(
 						event.getMenuEntries()
@@ -606,6 +738,346 @@ public class RogueChestsFcPlugin extends Plugin
 				.setType(MenuAction.RUNELITE)
 				.onClick(menuEntry ->
 						addIgnoredNames(playerName));
+	}
+
+	boolean isAuthorized()
+	{
+		return config.pluginAuthorized()
+				&& AUTH_VERSION.equals(
+				config.pluginAuthorizationVersion()
+		);
+	}
+
+	boolean authorize(String passcode)
+	{
+		if (passcode == null || passcode.isEmpty())
+		{
+			return false;
+		}
+
+		char[] passcodeChars = passcode.toCharArray();
+
+		try
+		{
+			byte[] salt = Base64.getDecoder().decode(
+					PASSCODE_SALT_BASE64
+			);
+
+			byte[] expectedHash = Base64.getDecoder().decode(
+					PASSCODE_HASH_BASE64
+			);
+
+			PBEKeySpec keySpec = new PBEKeySpec(
+					passcodeChars,
+					salt,
+					PBKDF2_ITERATIONS,
+					PBKDF2_KEY_LENGTH_BITS
+			);
+
+			byte[] actualHash;
+
+			try
+			{
+				SecretKeyFactory keyFactory =
+						SecretKeyFactory.getInstance(
+								"PBKDF2WithHmacSHA256"
+						);
+
+				actualHash = keyFactory
+						.generateSecret(keySpec)
+						.getEncoded();
+			}
+			finally
+			{
+				keySpec.clearPassword();
+			}
+
+			boolean matches = MessageDigest.isEqual(
+					expectedHash,
+					actualHash
+			);
+
+			Arrays.fill(actualHash, (byte) 0);
+
+			if (!matches)
+			{
+				return false;
+			}
+
+			configManager.setConfiguration(
+					CONFIG_GROUP,
+					PLUGIN_AUTHORIZED_KEY,
+					true
+			);
+
+			byte[] partyKey = derivePartyKey(
+					passcodeChars
+			);
+
+			try
+			{
+				configManager.setConfiguration(
+						CONFIG_GROUP,
+						PLUGIN_AUTHORIZATION_VERSION_KEY,
+						AUTH_VERSION
+				);
+
+				configManager.setConfiguration(
+						CONFIG_GROUP,
+						PARTY_KEY_MATERIAL_KEY,
+						Base64.getEncoder()
+								.encodeToString(
+										partyKey
+								)
+				);
+			}
+			finally
+			{
+				Arrays.fill(partyKey, (byte) 0);
+			}
+
+			activateAuthorizedFeatures();
+
+			return true;
+		}
+		catch (GeneralSecurityException
+		       | IllegalArgumentException exception)
+		{
+			log.error(
+					"Unable to verify plugin passcode",
+					exception
+			);
+
+			return false;
+		}
+		finally
+		{
+			Arrays.fill(passcodeChars, '\0');
+		}
+	}
+
+	private byte[] derivePartyKey(
+			char[] passcodeChars)
+			throws GeneralSecurityException
+	{
+		byte[] salt = Base64.getDecoder().decode(
+				PARTY_KEY_SALT_BASE64
+		);
+
+		PBEKeySpec keySpec = new PBEKeySpec(
+				passcodeChars,
+				salt,
+				PARTY_PBKDF2_ITERATIONS,
+				PARTY_KEY_LENGTH_BITS
+		);
+
+		try
+		{
+			SecretKeyFactory keyFactory =
+					SecretKeyFactory.getInstance(
+							"PBKDF2WithHmacSHA256"
+					);
+
+			return keyFactory
+					.generateSecret(keySpec)
+					.getEncoded();
+		}
+		finally
+		{
+			keySpec.clearPassword();
+		}
+	}
+
+	private String decryptPartyPassphrase()
+	{
+		String encodedKey =
+				configManager.getConfiguration(
+						CONFIG_GROUP,
+						PARTY_KEY_MATERIAL_KEY
+				);
+
+		if (encodedKey == null
+				|| encodedKey.trim().isEmpty())
+		{
+			return null;
+		}
+
+		byte[] key = null;
+		byte[] decrypted = null;
+
+		try
+		{
+			key = Base64.getDecoder().decode(
+					encodedKey
+			);
+
+			byte[] iv = Base64.getDecoder().decode(
+					PARTY_IV_BASE64
+			);
+
+			byte[] ciphertext =
+					Base64.getDecoder().decode(
+							PARTY_CIPHERTEXT_BASE64
+					);
+
+			Cipher cipher = Cipher.getInstance(
+					"AES/CBC/PKCS5Padding"
+			);
+
+			cipher.init(
+					Cipher.DECRYPT_MODE,
+					new SecretKeySpec(key, "AES"),
+					new IvParameterSpec(iv)
+			);
+
+			decrypted = cipher.doFinal(ciphertext);
+
+			return new String(
+					decrypted,
+					StandardCharsets.UTF_8
+			);
+		}
+		catch (GeneralSecurityException
+		       | IllegalArgumentException exception)
+		{
+			log.debug(
+					"Unable to decrypt Party passphrase",
+					exception
+			);
+
+			return null;
+		}
+		finally
+		{
+			if (key != null)
+			{
+				Arrays.fill(key, (byte) 0);
+			}
+
+			if (decrypted != null)
+			{
+				Arrays.fill(decrypted, (byte) 0);
+			}
+		}
+	}
+
+	private void updatePartyMembership()
+	{
+		if (!authorizedFeaturesActive
+				|| client.getGameState()
+				!= GameState.LOGGED_IN)
+		{
+			return;
+		}
+
+		if (!config.autoJoinPartyInWilderness())
+		{
+			leaveManagedParty();
+			wasInWilderness = false;
+			return;
+		}
+
+		boolean inManagedPartyArea =
+				isInManagedPartyArea();
+
+		if (inManagedPartyArea == wasInWilderness)
+		{
+			return;
+		}
+
+		wasInWilderness = inManagedPartyArea;
+
+		if (inManagedPartyArea)
+		{
+			joinManagedParty();
+		}
+		else
+		{
+			leaveManagedParty();
+		}
+	}
+
+	private boolean isInManagedPartyArea()
+	{
+		if (client.getVarbitValue(
+				IN_WILDERNESS_VARBIT
+		) == 1)
+		{
+			return true;
+		}
+
+		Player localPlayer = client.getLocalPlayer();
+
+		if (localPlayer == null)
+		{
+			return false;
+		}
+
+		int regionId =
+				localPlayer.getWorldLocation()
+						.getRegionID();
+
+		return regionId == FEROX_ENCLAVE_WEST_REGION_ID
+				|| regionId
+				== FEROX_ENCLAVE_EAST_REGION_ID;
+	}
+
+	private void joinManagedParty()
+	{
+		String passphrase = decryptPartyPassphrase();
+
+		if (passphrase == null
+				|| passphrase.isEmpty())
+		{
+			return;
+		}
+
+		try
+		{
+			if (!partyService.isInParty()
+					|| !passphrase.equals(
+					partyService.getPartyPassphrase()
+			))
+			{
+				partyService.changeParty(passphrase);
+			}
+
+			partyJoinedByPlugin = true;
+		}
+		catch (RuntimeException exception)
+		{
+			log.debug(
+					"Unable to join managed Party",
+					exception
+			);
+		}
+	}
+
+	private void leaveManagedParty()
+	{
+		if (!partyJoinedByPlugin)
+		{
+			return;
+		}
+
+		try
+		{
+			if (partyService.isInParty())
+			{
+				partyService.changeParty(null);
+			}
+		}
+		catch (RuntimeException exception)
+		{
+			log.debug(
+					"Unable to leave managed Party",
+					exception
+			);
+		}
+		finally
+		{
+			partyJoinedByPlugin = false;
+		}
 	}
 
 	List<String> getIgnoredPlayerNames()

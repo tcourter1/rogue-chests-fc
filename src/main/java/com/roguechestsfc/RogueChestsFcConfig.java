@@ -83,6 +83,18 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "autoJoinPartyInWilderness",
+            name = "Auto-join Party",
+            description = "Automatically join the configured Party while in the Wilderness and leave it when exiting",
+            position = 3,
+            section = generalSection
+    )
+    default boolean autoJoinPartyInWilderness()
+    {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "showLowLevelPanel",
             name = "Show panel",
             description = "Show FC members with less than 84 Thieving",
@@ -363,6 +375,39 @@ public interface RogueChestsFcConfig extends Config
             hidden = true
     )
     default String overtimeWhitelistNames()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "pluginAuthorized",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default boolean pluginAuthorized()
+    {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "pluginAuthorizationVersion",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default String pluginAuthorizationVersion()
+    {
+        return "";
+    }
+
+    @ConfigItem(
+            keyName = "pluginAuthorizationHash",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default String pluginAuthorizationHash()
     {
         return "";
     }

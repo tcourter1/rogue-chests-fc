@@ -1,13 +1,6 @@
 package com.roguechestsfc;
 
-import java.awt.BorderLayout;
-import java.awt.Component;
-import java.awt.Cursor;
-import java.awt.Dimension;
-import java.awt.Font;
-import java.awt.Graphics;
-import java.awt.GridLayout;
-import java.awt.Rectangle;
+import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
@@ -20,6 +13,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JPasswordField;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
@@ -59,6 +53,11 @@ public class RogueChestsFcPanel extends PluginPanel
     private final ConfigManager configManager;
 
     private String bannedSearchQuery = "";
+    private boolean authorized;
+
+    private final JPanel contentContainer = new JPanel();
+    private final JPasswordField passcodeField = new JPasswordField();
+    private final JLabel unlockStatusLabel = new JLabel();
 
     private final JTextArea ignoredNamesInput = new JTextArea();
     private final JTextArea bannedNamesInput = new JTextArea();
@@ -85,22 +84,266 @@ public class RogueChestsFcPanel extends PluginPanel
         setBorder(new EmptyBorder(10, 4, 10, 8));
         setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-        add(createHeader());
-        add(Box.createRigidArea(new Dimension(0, 12)));
+        contentContainer.setLayout(
+                new BoxLayout(contentContainer, BoxLayout.Y_AXIS)
+        );
+        contentContainer.setBackground(ColorScheme.DARK_GRAY_COLOR);
+        contentContainer.setAlignmentX(Component.LEFT_ALIGNMENT);
+        contentContainer.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE
+                )
+        );
 
-        add(createIgnoredNamesSection());
-        add(Box.createRigidArea(new Dimension(0, 14)));
+        add(contentContainer);
 
-        add(createBannedNamesSection());
-        add(Box.createRigidArea(new Dimension(0, 14)));
+        rebuildPanelContents();
+    }
 
-        add(createCapturedNearbyNamesSection());
-        add(Box.createRigidArea(new Dimension(0, 14)));
+    void setAuthorized(boolean authorized)
+    {
+        if (!SwingUtilities.isEventDispatchThread())
+        {
+            SwingUtilities.invokeLater(
+                    () -> setAuthorized(authorized)
+            );
+            return;
+        }
 
-        add(createOvertimeWhitelistSection());
-        add(Box.createRigidArea(new Dimension(0, 10)));
+        if (this.authorized == authorized)
+        {
+            return;
+        }
 
-        refresh();
+        this.authorized = authorized;
+        rebuildPanelContents();
+    }
+
+    private void rebuildPanelContents()
+    {
+        contentContainer.removeAll();
+
+        contentContainer.add(createHeader());
+        contentContainer.add(
+                Box.createRigidArea(
+                        new Dimension(0, 12)
+                )
+        );
+
+        if (!authorized)
+        {
+            contentContainer.add(createLockedPanel());
+        }
+        else
+        {
+            contentContainer.add(createIgnoredNamesSection());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 14)
+                    )
+            );
+
+            contentContainer.add(createBannedNamesSection());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 14)
+                    )
+            );
+
+            contentContainer.add(createCapturedNearbyNamesSection());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 14)
+                    )
+            );
+
+            contentContainer.add(createOvertimeWhitelistSection());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 10)
+                    )
+            );
+
+            refresh();
+        }
+
+        contentContainer.revalidate();
+        contentContainer.repaint();
+
+        revalidate();
+        repaint();
+    }
+
+    private JPanel createLockedPanel()
+    {
+        JPanel panel = createSectionPanel();
+
+        panel.setBorder(
+                new EmptyBorder(0, 8, 0, 8)
+        );
+
+        JLabel title = new JLabel(
+                "Plugin Locked",
+                SwingConstants.CENTER
+        );
+
+        title.setForeground(ColorScheme.BRAND_ORANGE);
+        title.setFont(
+                title.getFont().deriveFont(
+                        Font.BOLD,
+                        14.0f
+                )
+        );
+        title.setAlignmentX(Component.CENTER_ALIGNMENT);
+        title.setHorizontalAlignment(SwingConstants.CENTER);
+        title.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        28
+                )
+        );
+
+        JLabel line1 = new JLabel(
+                "Enter your passcode",
+                SwingConstants.CENTER
+        );
+
+        line1.setForeground(
+                ColorScheme.LIGHT_GRAY_COLOR
+        );
+        line1.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        line1.setHorizontalAlignment(
+                SwingConstants.CENTER
+        );
+        line1.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        20
+                )
+        );
+
+        JLabel line2 = new JLabel(
+                "to unlock the plugin.",
+                SwingConstants.CENTER
+        );
+
+        line2.setForeground(
+                ColorScheme.LIGHT_GRAY_COLOR
+        );
+        line2.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        line2.setHorizontalAlignment(
+                SwingConstants.CENTER
+        );
+        line2.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        20
+                )
+        );
+
+        passcodeField.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        passcodeField.setHorizontalAlignment(
+                SwingConstants.CENTER
+        );
+        passcodeField.setPreferredSize(
+                new Dimension(0, BUTTON_HEIGHT)
+        );
+        passcodeField.setMinimumSize(
+                new Dimension(0, BUTTON_HEIGHT)
+        );
+        passcodeField.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        BUTTON_HEIGHT
+                )
+        );
+        passcodeField.setToolTipText(
+                "Enter plugin passcode"
+        );
+
+        JButton unlockButton = createButton(
+                "Unlock",
+                this::attemptUnlock
+        );
+
+        configureFullWidthButton(unlockButton);
+        unlockButton.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+
+        unlockStatusLabel.setForeground(Color.RED);
+        unlockStatusLabel.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        unlockStatusLabel.setHorizontalAlignment(
+                SwingConstants.CENTER
+        );
+        unlockStatusLabel.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        22
+                )
+        );
+        unlockStatusLabel.setText(" ");
+
+        passcodeField.addActionListener(
+                ignored -> attemptUnlock()
+        );
+
+        panel.add(title);
+        panel.add(Box.createRigidArea(new Dimension(0, 8)));
+        panel.add(line1);
+        panel.add(line2);
+        panel.add(Box.createRigidArea(new Dimension(0, 8)));
+        panel.add(passcodeField);
+        panel.add(Box.createRigidArea(new Dimension(0, 6)));
+        panel.add(unlockButton);
+        panel.add(Box.createRigidArea(new Dimension(0, 6)));
+        panel.add(unlockStatusLabel);
+
+        return panel;
+    }
+
+    private void attemptUnlock()
+    {
+        char[] password = passcodeField.getPassword();
+
+        if (password == null || password.length == 0)
+        {
+            unlockStatusLabel.setText(
+                    "Enter a passcode."
+            );
+            return;
+        }
+
+        String passcode = new String(password);
+
+        try
+        {
+            if (!plugin.authorize(passcode))
+            {
+                unlockStatusLabel.setText(
+                        "Incorrect passcode."
+                );
+                passcodeField.selectAll();
+                return;
+            }
+
+            passcodeField.setText("");
+            unlockStatusLabel.setText(" ");
+            setAuthorized(true);
+        }
+        finally
+        {
+            java.util.Arrays.fill(password, '\0');
+        }
     }
 
     private JPanel createHeader()
@@ -781,6 +1024,11 @@ public class RogueChestsFcPanel extends PluginPanel
         if (!SwingUtilities.isEventDispatchThread())
         {
             SwingUtilities.invokeLater(this::refresh);
+            return;
+        }
+
+        if (!authorized)
+        {
             return;
         }
 
