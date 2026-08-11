@@ -90,8 +90,6 @@ public class RogueChestsFcPlugin extends Plugin
 {
 	private static final String CONFIG_GROUP = "roguechestsfc";
 	private static final int ROGUES_CASTLE_REGION_ID = 13117;
-	private static final int FEROX_ENCLAVE_WEST_REGION_ID = 12344;
-	private static final int FEROX_ENCLAVE_EAST_REGION_ID = 12600;
 	private static final String IGNORED_NAMES_KEY = "ignoredNames";
 	private static final String BANNED_NAMES_KEY = "bannedNames";
 	private static final String CAPTURED_NEARBY_NAMES_KEY =
@@ -123,8 +121,6 @@ public class RogueChestsFcPlugin extends Plugin
 			"I9Sv9X/mfvN//A/jxLmu0Q==";
 	private static final String PARTY_CIPHERTEXT_BASE64 =
 			"xfGmG78Zf/cgnbSq7c2PJQ==";
-
-	private static final int IN_WILDERNESS_VARBIT = 5963;
 
 	private static final String IGNORE_MENU_OPTION =
 			"Plugin ignore";
@@ -220,6 +216,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private RogueChestsFcOvertimeOverlay overtimeOverlay;
 
 	@Inject
+	private RogueChestsFcPartyOverlay partyOverlay;
+
+	@Inject
 	private RogueChestsFcPanel panel;
 
 	@Inject
@@ -293,8 +292,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private volatile boolean suppressJoinMessages = true;
 	private volatile boolean authorizedFeaturesActive;
-	private boolean wasInWilderness;
-	private boolean partyJoinedByPlugin;
+	private boolean partyJoinBannerVisible;
 
 	@Provides
 	RogueChestsFcConfig provideConfig(
@@ -354,25 +352,25 @@ public class RogueChestsFcPlugin extends Plugin
 
 		overlayManager.add(overlay);
 		overlayManager.add(overtimeOverlay);
+		overlayManager.add(partyOverlay);
 
 		suppressJoinMessages = true;
 		queueCurrentMembersWhenAvailable();
 
 		if (client.getGameState() == GameState.LOGGED_IN)
 		{
-			updatePartyMembership();
+			updatePartyJoinBannerForLogin();
 		}
 	}
 
 	@Override
 	protected void shutDown()
 	{
-		leaveManagedParty();
-
 		if (authorizedFeaturesActive)
 		{
 			overlayManager.remove(overlay);
 			overlayManager.remove(overtimeOverlay);
+			overlayManager.remove(partyOverlay);
 			authorizedFeaturesActive = false;
 		}
 
@@ -626,8 +624,6 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		updatePartyMembership();
-
 		for (int i = 0; i < LOOKUPS_PER_TICK; i++)
 		{
 			String normalizedName =
@@ -657,12 +653,12 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			updatePartyMembership();
+			updatePartyJoinBannerForLogin();
 			return;
 		}
 
-		leaveManagedParty();
-		wasInWilderness = false;
+		partyJoinBannerVisible = false;
+		panel.refresh();
 
 		clearNearbyMemberTracking();
 		equipmentScannedVisibleMembers.clear();
@@ -961,69 +957,36 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 	}
 
-	private void updatePartyMembership()
+	private void updatePartyJoinBannerForLogin()
 	{
-		if (!authorizedFeaturesActive
-				|| client.getGameState()
-				!= GameState.LOGGED_IN)
-		{
-			return;
-		}
+		partyJoinBannerVisible =
+				authorizedFeaturesActive
+						&& !partyService.isInParty();
 
-		if (!config.autoJoinPartyInWilderness())
-		{
-			leaveManagedParty();
-			wasInWilderness = false;
-			return;
-		}
-
-		boolean inManagedPartyArea =
-				isInManagedPartyArea();
-
-		if (inManagedPartyArea == wasInWilderness)
-		{
-			return;
-		}
-
-		wasInWilderness = inManagedPartyArea;
-
-		if (inManagedPartyArea)
-		{
-			joinManagedParty();
-		}
-		else
-		{
-			leaveManagedParty();
-		}
+		panel.refresh();
 	}
 
-	private boolean isInManagedPartyArea()
+	boolean shouldShowPartyJoinBanner()
 	{
-		if (client.getVarbitValue(
-				IN_WILDERNESS_VARBIT
-		) == 1)
-		{
-			return true;
-		}
-
-		Player localPlayer = client.getLocalPlayer();
-
-		if (localPlayer == null)
-		{
-			return false;
-		}
-
-		int regionId =
-				localPlayer.getWorldLocation()
-						.getRegionID();
-
-		return regionId == FEROX_ENCLAVE_WEST_REGION_ID
-				|| regionId
-				== FEROX_ENCLAVE_EAST_REGION_ID;
+		return authorizedFeaturesActive
+				&& partyJoinBannerVisible
+				&& !partyService.isInParty();
 	}
 
-	private void joinManagedParty()
+	void dismissPartyJoinBanner()
 	{
+		partyJoinBannerVisible = false;
+		panel.refresh();
+	}
+
+
+	void joinStaffParty()
+	{
+		if (!authorizedFeaturesActive)
+		{
+			return;
+		}
+
 		String passphrase = decryptPartyPassphrase();
 
 		if (passphrase == null
@@ -1042,20 +1005,21 @@ public class RogueChestsFcPlugin extends Plugin
 				partyService.changeParty(passphrase);
 			}
 
-			partyJoinedByPlugin = true;
+			partyJoinBannerVisible = false;
+			panel.refresh();
 		}
 		catch (RuntimeException exception)
 		{
 			log.debug(
-					"Unable to join managed Party",
+					"Unable to join staff Party",
 					exception
 			);
 		}
 	}
 
-	private void leaveManagedParty()
+	void leaveStaffParty()
 	{
-		if (!partyJoinedByPlugin)
+		if (!authorizedFeaturesActive)
 		{
 			return;
 		}
@@ -1066,19 +1030,25 @@ public class RogueChestsFcPlugin extends Plugin
 			{
 				partyService.changeParty(null);
 			}
+
+			partyJoinBannerVisible = false;
+			panel.refresh();
 		}
 		catch (RuntimeException exception)
 		{
 			log.debug(
-					"Unable to leave managed Party",
+					"Unable to leave staff Party",
 					exception
 			);
 		}
-		finally
-		{
-			partyJoinedByPlugin = false;
-		}
 	}
+
+	boolean isInParty()
+	{
+		return authorizedFeaturesActive
+				&& partyService.isInParty();
+	}
+
 
 	List<String> getIgnoredPlayerNames()
 	{

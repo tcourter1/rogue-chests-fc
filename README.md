@@ -26,15 +26,18 @@ Certain staff-only features are protected behind a one-time passcode.
 - Plugin functionality remains disabled until the correct passcode has been entered.
 - Future passcode rotations can invalidate previous authorizations when required.
 
-### Party Automation (Staff Only)
+### Party Plugin Integration (Staff Only)
 
-Once the plugin has been authorized with the staff passcode, it can automatically manage RuneLite Party membership.
+Once the plugin has been authorized with the staff passcode, it provides quick access to the configured RuneLite Party.
 
-- Automatically joins the configured Party when entering the Wilderness or Ferox Enclave.
-- Automatically leaves the Party when leaving the Wilderness/Ferox area, logging out, or disabling the plugin.
-- Can be disabled at any time through the **Auto-join Party** configuration option.
+- Prompts authorized users on login to join the Party.
+- Joining the Party always requires a manual **Join** button press.
+- Users can select **Not now** to dismiss the login prompt.
+- A top-center warning reminds users when the Party prompt is awaiting a response.
+- **Join Party** and **Leave Party** controls are available from the plugin sidebar.
+- The Party passphrase is handled internally, so authorized users do not need to manually enter it.
 
-> **Important:** Party automation **only works after the plugin has been unlocked with the staff passcode.** Users who have **not** entered the correct passcode will **never** automatically join the configured Party, even if the Auto-join Party option is enabled.
+> **Important:** Party integration is only available after the plugin has been unlocked with the staff passcode. The plugin does **not** automatically join or leave a Party; all Party membership changes require explicit user interaction.
 
 ## Under-84 Panel
 

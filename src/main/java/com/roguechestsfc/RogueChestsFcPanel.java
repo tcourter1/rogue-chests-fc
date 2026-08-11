@@ -56,6 +56,7 @@ public class RogueChestsFcPanel extends PluginPanel
     private boolean authorized;
 
     private final JPanel contentContainer = new JPanel();
+    private final JPanel partyControlsContainer = new JPanel();
     private final JPasswordField passcodeField = new JPasswordField();
     private final JLabel unlockStatusLabel = new JLabel();
 
@@ -137,6 +138,13 @@ public class RogueChestsFcPanel extends PluginPanel
         }
         else
         {
+            contentContainer.add(createPartyControlsSection());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 14)
+                    )
+            );
+
             contentContainer.add(createIgnoredNamesSection());
             contentContainer.add(
                     Box.createRigidArea(
@@ -344,6 +352,211 @@ public class RogueChestsFcPanel extends PluginPanel
         {
             java.util.Arrays.fill(password, '\0');
         }
+    }
+
+    private JPanel createPartyControlsSection()
+    {
+        partyControlsContainer.removeAll();
+        partyControlsContainer.setLayout(
+                new BoxLayout(
+                        partyControlsContainer,
+                        BoxLayout.Y_AXIS
+                )
+        );
+        partyControlsContainer.setBackground(
+                ColorScheme.DARK_GRAY_COLOR
+        );
+        partyControlsContainer.setAlignmentX(
+                Component.LEFT_ALIGNMENT
+        );
+        partyControlsContainer.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE
+                )
+        );
+
+        if (plugin.shouldShowPartyJoinBanner())
+        {
+            JPanel banner = createSectionPanel();
+
+            banner.setBackground(
+                    ColorScheme.DARKER_GRAY_COLOR
+            );
+            banner.setBorder(
+                    BorderFactory.createCompoundBorder(
+                            BorderFactory.createLineBorder(
+                                    ColorScheme.BRAND_ORANGE,
+                                    1
+                            ),
+                            new EmptyBorder(8, 8, 8, 8)
+                    )
+            );
+
+            JLabel heading = new JLabel(
+                    "PARTY PLUGIN",
+                    SwingConstants.CENTER
+            );
+
+            heading.setForeground(
+                    ColorScheme.BRAND_ORANGE
+            );
+            heading.setFont(
+                    heading.getFont().deriveFont(
+                            Font.BOLD,
+                            13.0f
+                    )
+            );
+            heading.setAlignmentX(
+                    Component.CENTER_ALIGNMENT
+            );
+            heading.setHorizontalAlignment(
+                    SwingConstants.CENTER
+            );
+            heading.setMaximumSize(
+                    new Dimension(
+                            Integer.MAX_VALUE,
+                            22
+                    )
+            );
+
+            JLabel line1 = new JLabel(
+                    "Join the Rogue Chests FC",
+                    SwingConstants.CENTER
+            );
+
+            line1.setForeground(
+                    ColorScheme.LIGHT_GRAY_COLOR
+            );
+            line1.setAlignmentX(
+                    Component.CENTER_ALIGNMENT
+            );
+            line1.setHorizontalAlignment(
+                    SwingConstants.CENTER
+            );
+            line1.setMaximumSize(
+                    new Dimension(
+                            Integer.MAX_VALUE,
+                            20
+                    )
+            );
+
+            JLabel line2 = new JLabel(
+                    "Party?",
+                    SwingConstants.CENTER
+            );
+
+            line2.setForeground(
+                    ColorScheme.LIGHT_GRAY_COLOR
+            );
+            line2.setAlignmentX(
+                    Component.CENTER_ALIGNMENT
+            );
+            line2.setHorizontalAlignment(
+                    SwingConstants.CENTER
+            );
+            line2.setMaximumSize(
+                    new Dimension(
+                            Integer.MAX_VALUE,
+                            20
+                    )
+            );
+
+            JButton joinPromptButton = createButton(
+                    "Join Party",
+                    this::joinParty
+            );
+
+            configurePromptButton(
+                    joinPromptButton
+            );
+
+            JButton notNowButton = createButton(
+                    "Not now",
+                    this::dismissPartyJoinBanner
+            );
+
+            configurePromptButton(
+                    notNowButton
+            );
+
+            banner.add(heading);
+            banner.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 6)
+                    )
+            );
+            banner.add(line1);
+            banner.add(line2);
+            banner.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 8)
+                    )
+            );
+            banner.add(joinPromptButton);
+            banner.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 5)
+                    )
+            );
+            banner.add(notNowButton);
+
+            partyControlsContainer.add(banner);
+            partyControlsContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 8)
+                    )
+            );
+        }
+
+        boolean inParty = plugin.isInParty();
+
+        JButton partyButton = createButton(
+                inParty ? "Leave Party" : "Join Party",
+                inParty
+                        ? this::leaveParty
+                        : this::joinParty
+        );
+
+        configureFullWidthButton(partyButton);
+
+        partyControlsContainer.add(partyButton);
+
+        return partyControlsContainer;
+    }
+
+    private void joinParty()
+    {
+        plugin.joinStaffParty();
+        refreshPartyControls();
+    }
+
+    private void leaveParty()
+    {
+        plugin.leaveStaffParty();
+        refreshPartyControls();
+    }
+
+    private void dismissPartyJoinBanner()
+    {
+        plugin.dismissPartyJoinBanner();
+        refreshPartyControls();
+    }
+
+    private void refreshPartyControls()
+    {
+        if (!authorized)
+        {
+            return;
+        }
+
+        createPartyControlsSection();
+
+        partyControlsContainer.revalidate();
+        partyControlsContainer.repaint();
+
+        contentContainer.revalidate();
+        contentContainer.repaint();
     }
 
     private JPanel createHeader()
@@ -895,6 +1108,23 @@ public class RogueChestsFcPanel extends PluginPanel
         return button;
     }
 
+    private void configurePromptButton(
+            JButton button)
+    {
+        button.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        button.setPreferredSize(
+                new Dimension(110, BUTTON_HEIGHT)
+        );
+        button.setMinimumSize(
+                new Dimension(110, BUTTON_HEIGHT)
+        );
+        button.setMaximumSize(
+                new Dimension(110, BUTTON_HEIGHT)
+        );
+    }
+
     private void configureFullWidthButton(
             JButton button)
     {
@@ -1031,6 +1261,8 @@ public class RogueChestsFcPanel extends PluginPanel
         {
             return;
         }
+
+        refreshPartyControls();
 
         rebuildList(
                 ignoredNamesList,
