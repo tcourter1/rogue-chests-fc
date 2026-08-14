@@ -134,7 +134,7 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final Duration DEPARTED_DISPLAY_DURATION =
 			Duration.ofMinutes(1);
 
-	private static final int LOOKUPS_PER_TICK = 5;
+	private static final int LOOKUPS_PER_TICK = 1;
 	private static final int REQUIRED_THIEVING_LEVEL = 84;
 
 	private static final KitType[] VISIBLE_EQUIPMENT_SLOTS =
@@ -271,6 +271,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private final Set<String> pendingJoinMessages =
 			ConcurrentHashMap.newKeySet();
 
+	private final Set<String> pendingF2pJoinMessages =
+			ConcurrentHashMap.newKeySet();
+
 	private final ConcurrentLinkedQueue<String> lookupQueue =
 			new ConcurrentLinkedQueue<>();
 
@@ -386,6 +389,7 @@ public class RogueChestsFcPlugin extends Plugin
 		lookupQueue.clear();
 		pendingLookups.clear();
 		pendingJoinMessages.clear();
+		pendingF2pJoinMessages.clear();
 		displayNames.clear();
 		lastLookupTimes.clear();
 		lastJoinMessageTimes.clear();
@@ -419,6 +423,7 @@ public class RogueChestsFcPlugin extends Plugin
 		{
 			suppressJoinMessages = true;
 			pendingJoinMessages.clear();
+			pendingF2pJoinMessages.clear();
 			queueCurrentMembersWhenAvailable();
 		}
 		else
@@ -428,6 +433,7 @@ public class RogueChestsFcPlugin extends Plugin
 			lookupQueue.clear();
 			pendingLookups.clear();
 			pendingJoinMessages.clear();
+			pendingF2pJoinMessages.clear();
 			displayNames.clear();
 			currentMembers.clear();
 			unrankedF2pMembers.clear();
@@ -508,11 +514,23 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizedName
 		))
 		{
-			showJoinNotification(
-					normalizedName,
-					playerName,
-					"(Unranked F2P)"
+			pendingF2pJoinMessages.add(
+					normalizedName
 			);
+
+			Integer cachedF2pLevel =
+					thievingLevels.get(
+							normalizedName
+					);
+
+			if (cachedF2pLevel != null)
+			{
+				showF2pJoinMessage(
+						normalizedName,
+						playerName,
+						cachedF2pLevel
+				);
+			}
 		}
 
 		if (shouldQueueJoinMessage(normalizedName))
@@ -557,6 +575,7 @@ public class RogueChestsFcPlugin extends Plugin
 		currentMembers.remove(normalizedName);
 		unrankedF2pMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
+		pendingF2pJoinMessages.remove(normalizedName);
 		equipmentScannedVisibleMembers.remove(normalizedName);
 		removeNearbyMemberTracking(normalizedName);
 
@@ -688,6 +707,7 @@ public class RogueChestsFcPlugin extends Plugin
 		if (event.getScriptId()
 				== ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD)
 		{
+			reconcileFriendsChatMembers();
 			refreshF2pMemberStates();
 			applyLevelsToMemberList();
 		}
@@ -2363,20 +2383,6 @@ public class RogueChestsFcPlugin extends Plugin
 					}
 				}
 
-				if (unrankedF2p
-						&& !bannedPlayer
-						&& config.showF2pJoinMessage()
-						&& !getIgnoredNames().contains(
-						normalizedName
-				))
-				{
-					showJoinNotification(
-							normalizedName,
-							playerName,
-							"(Unranked F2P)"
-					);
-				}
-
 				LowLevelMember lowLevelMember =
 						lowLevelMembers.get(
 								normalizedName
@@ -2433,6 +2439,10 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizedName
 		);
 
+		pendingF2pJoinMessages.remove(
+				normalizedName
+		);
+
 		pendingLookups.remove(normalizedName);
 		displayNames.remove(normalizedName);
 
@@ -2473,6 +2483,20 @@ public class RogueChestsFcPlugin extends Plugin
 				LOOKUP_COOLDOWN
 		) < 0)
 		{
+			Integer cachedLevel =
+					thievingLevels.get(
+							normalizedName
+					);
+
+			if (cachedLevel != null)
+			{
+				showF2pJoinMessage(
+						normalizedName,
+						playerName,
+						cachedLevel
+				);
+			}
+
 			updateLowLevelMemberFromCache(
 					normalizedName,
 					playerName
@@ -2489,11 +2513,6 @@ public class RogueChestsFcPlugin extends Plugin
 		{
 			return;
 		}
-
-		lastLookupTimes.put(
-				normalizedName,
-				now
-		);
 
 		displayNames.put(
 				normalizedName,
@@ -2580,8 +2599,19 @@ public class RogueChestsFcPlugin extends Plugin
 
 		int level = thieving.getLevel();
 
+		lastLookupTimes.put(
+				normalizedName,
+				Instant.now()
+		);
+
 		thievingLevels.put(
 				normalizedName,
+				level
+		);
+
+		showF2pJoinMessage(
+				normalizedName,
+				playerName,
 				level
 		);
 
@@ -2639,6 +2669,44 @@ public class RogueChestsFcPlugin extends Plugin
 
 		clientThread.invoke(
 				this::applyLevelsToMemberList
+		);
+	}
+
+	private void showF2pJoinMessage(
+			String normalizedName,
+			String playerName,
+			int thievingLevel)
+	{
+		if (!pendingF2pJoinMessages.remove(
+				normalizedName
+		))
+		{
+			return;
+		}
+
+		if (!config.showF2pJoinMessage()
+				|| getIgnoredNames().contains(
+				normalizedName
+		)
+				|| getBannedNames().contains(
+				normalizedName
+		)
+				|| !unrankedF2pMembers.contains(
+				normalizedName
+		)
+				|| !currentMembers.contains(
+				normalizedName
+		))
+		{
+			return;
+		}
+
+		showJoinNotification(
+				normalizedName,
+				playerName,
+				"(F2P - "
+						+ thievingLevel
+						+ " Thieving)"
 		);
 	}
 
@@ -2750,6 +2818,63 @@ public class RogueChestsFcPlugin extends Plugin
 		return getBannedNames().contains(
 				normalizeName(playerName)
 		);
+	}
+
+	private void reconcileFriendsChatMembers()
+	{
+		FriendsChatManager friendsChatManager =
+				client.getFriendsChatManager();
+
+		if (friendsChatManager == null)
+		{
+			return;
+		}
+
+		FriendsChatMember[] members =
+				friendsChatManager.getMembers();
+
+		if (members == null)
+		{
+			return;
+		}
+
+		Set<String> actualMembers =
+				new HashSet<>();
+
+		for (FriendsChatMember member : members)
+		{
+			if (member == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(member.getName());
+
+			if (!normalizedName.isEmpty())
+			{
+				actualMembers.add(normalizedName);
+			}
+		}
+
+		for (String normalizedName
+				: new HashSet<>(currentMembers))
+		{
+			if (actualMembers.contains(normalizedName))
+			{
+				continue;
+			}
+
+			currentMembers.remove(normalizedName);
+			unrankedF2pMembers.remove(normalizedName);
+			pendingJoinMessages.remove(normalizedName);
+			pendingF2pJoinMessages.remove(normalizedName);
+			equipmentScannedVisibleMembers.remove(normalizedName);
+			removeNearbyMemberTracking(normalizedName);
+			markMemberDeparted(normalizedName);
+		}
+
+		currentMembers.addAll(actualMembers);
 	}
 
 	private void refreshF2pMemberStates()
