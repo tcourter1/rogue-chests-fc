@@ -747,13 +747,17 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
-			partyReminderDismissedForLogin = false;
 			updatePartyJoinBannerForLogin();
 			return;
 		}
 
 		partyJoinBannerVisible = false;
-		partyReminderDismissedForLogin = false;
+
+		if (event.getGameState() == GameState.LOGIN_SCREEN)
+		{
+			partyReminderDismissedForLogin = false;
+		}
+
 		panel.refresh();
 
 		partyPingBeamOverlay.clearPings();
