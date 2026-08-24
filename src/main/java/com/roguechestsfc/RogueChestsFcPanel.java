@@ -54,6 +54,8 @@ public class RogueChestsFcPanel extends PluginPanel
 
     private String bannedSearchQuery = "";
     private boolean authorized;
+    private RogueChestsFcConfig.PluginMode mode =
+            RogueChestsFcConfig.PluginMode.NONE;
 
     private final JPanel contentContainer = new JPanel();
     private final JPanel partyControlsContainer = new JPanel();
@@ -121,6 +123,34 @@ public class RogueChestsFcPanel extends PluginPanel
         rebuildPanelContents();
     }
 
+    void setModeState(
+            RogueChestsFcConfig.PluginMode mode,
+            boolean authorized)
+    {
+        if (!SwingUtilities.isEventDispatchThread())
+        {
+            SwingUtilities.invokeLater(
+                    () -> setModeState(mode, authorized)
+            );
+            return;
+        }
+
+        RogueChestsFcConfig.PluginMode newMode =
+                mode == null
+                        ? RogueChestsFcConfig.PluginMode.NONE
+                        : mode;
+
+        if (this.mode == newMode
+                && this.authorized == authorized)
+        {
+            return;
+        }
+
+        this.mode = newMode;
+        this.authorized = authorized;
+        rebuildPanelContents();
+    }
+
     private void rebuildPanelContents()
     {
         contentContainer.removeAll();
@@ -132,30 +162,69 @@ public class RogueChestsFcPanel extends PluginPanel
                 )
         );
 
-        if (!authorized)
+        if (mode == RogueChestsFcConfig.PluginMode.NONE)
         {
-            contentContainer.add(createLockedPanel());
+            contentContainer.add(createModeChooser());
+        }
+        else if (mode == RogueChestsFcConfig.PluginMode.STAFF)
+        {
+            contentContainer.add(createSwitchModeButton());
+            contentContainer.add(
+                    Box.createRigidArea(
+                            new Dimension(0, 12)
+                    )
+            );
+
+            if (!authorized)
+            {
+                contentContainer.add(createLockedPanel());
+            }
+            else
+            {
+                contentContainer.add(createPartyControlsSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+                contentContainer.add(createIgnoredNamesSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+                contentContainer.add(createBannedNamesSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+                contentContainer.add(createCapturedNearbyNamesSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+                contentContainer.add(createOvertimeWhitelistSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 10)
+                        )
+                );
+
+                refresh();
+            }
         }
         else
         {
-            contentContainer.add(createPartyControlsSection());
+            contentContainer.add(createSwitchModeButton());
             contentContainer.add(
                     Box.createRigidArea(
-                            new Dimension(0, 14)
-                    )
-            );
-
-            contentContainer.add(createIgnoredNamesSection());
-            contentContainer.add(
-                    Box.createRigidArea(
-                            new Dimension(0, 14)
-                    )
-            );
-
-            contentContainer.add(createBannedNamesSection());
-            contentContainer.add(
-                    Box.createRigidArea(
-                            new Dimension(0, 14)
+                            new Dimension(0, 12)
                     )
             );
 
@@ -181,6 +250,144 @@ public class RogueChestsFcPanel extends PluginPanel
 
         revalidate();
         repaint();
+    }
+
+    private JPanel createModeChooser()
+    {
+        JPanel outer = createSectionPanel();
+
+        JPanel card = createSectionPanel();
+        card.setBorder(
+                BorderFactory.createCompoundBorder(
+                        BorderFactory.createLineBorder(
+                                ColorScheme.MEDIUM_GRAY_COLOR
+                        ),
+                        new EmptyBorder(10, 10, 10, 10)
+                )
+        );
+        card.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE
+                )
+        );
+
+        JLabel title = new JLabel(
+                "Choose Mode",
+                SwingConstants.CENTER
+        );
+
+        title.setForeground(ColorScheme.BRAND_ORANGE);
+        title.setFont(
+                title.getFont().deriveFont(
+                        Font.BOLD,
+                        14.0f
+                )
+        );
+        title.setAlignmentX(Component.CENTER_ALIGNMENT);
+        title.setHorizontalAlignment(SwingConstants.CENTER);
+        title.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        28
+                )
+        );
+
+        JLabel description = new JLabel(
+                "<html><div style='text-align:center;'>"
+                        + "Staff Mode unlocks all features with a password.<br><br>"
+                        + "Thiever Mode provides Nearby Outsider and Overtime tools "
+                        + "without a passcode."
+                        + "</div></html>",
+                SwingConstants.CENTER
+        );
+
+        description.setForeground(
+                ColorScheme.LIGHT_GRAY_COLOR
+        );
+        description.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        description.setHorizontalAlignment(
+                SwingConstants.CENTER
+        );
+        description.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        Integer.MAX_VALUE
+                )
+        );
+
+        JButton staffButton = createButton(
+                "Staff Mode",
+                () -> selectMode(
+                        RogueChestsFcConfig.PluginMode.STAFF
+                )
+        );
+
+        JButton thieverButton = createButton(
+                "Thiever Mode",
+                () -> selectMode(
+                        RogueChestsFcConfig.PluginMode.THIEVER
+                )
+        );
+
+        staffButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+        thieverButton.setAlignmentX(Component.CENTER_ALIGNMENT);
+
+        staffButton.setPreferredSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+        staffButton.setMaximumSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+
+        thieverButton.setPreferredSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+        thieverButton.setMaximumSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+
+        card.add(title);
+        card.add(Box.createRigidArea(new Dimension(0, 8)));
+        card.add(description);
+        card.add(Box.createRigidArea(new Dimension(0, 12)));
+        card.add(staffButton);
+        card.add(Box.createRigidArea(new Dimension(0, 6)));
+        card.add(thieverButton);
+
+        outer.add(card);
+
+        return outer;
+    }
+
+    private JPanel createSwitchModeButton()
+    {
+        JPanel panel = createSectionPanel();
+
+        JButton switchButton = createButton(
+                "Switch Mode",
+                this::resetModeSelection
+        );
+
+        configureFullWidthButton(switchButton);
+        panel.add(switchButton);
+
+        return panel;
+    }
+
+    private void selectMode(
+            RogueChestsFcConfig.PluginMode selectedMode)
+    {
+        plugin.setPluginMode(selectedMode);
+    }
+
+    private void resetModeSelection()
+    {
+        plugin.setPluginMode(
+                RogueChestsFcConfig.PluginMode.NONE
+        );
     }
 
     private JPanel createLockedPanel()
@@ -335,7 +542,8 @@ public class RogueChestsFcPanel extends PluginPanel
 
         try
         {
-            if (!plugin.authorize(passcode))
+            if (mode != RogueChestsFcConfig.PluginMode.STAFF
+                    || !plugin.authorize(passcode))
             {
                 unlockStatusLabel.setText(
                         "Incorrect passcode."
@@ -545,7 +753,8 @@ public class RogueChestsFcPanel extends PluginPanel
 
     private void refreshPartyControls()
     {
-        if (!authorized)
+        if (!authorized
+                || mode != RogueChestsFcConfig.PluginMode.STAFF)
         {
             return;
         }
@@ -1108,6 +1317,23 @@ public class RogueChestsFcPanel extends PluginPanel
         return button;
     }
 
+    private void configureModeButton(
+            JButton button)
+    {
+        button.setAlignmentX(
+                Component.CENTER_ALIGNMENT
+        );
+        button.setPreferredSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+        button.setMinimumSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+        button.setMaximumSize(
+                new Dimension(180, BUTTON_HEIGHT)
+        );
+    }
+
     private void configurePromptButton(
             JButton button)
     {
@@ -1257,20 +1483,28 @@ public class RogueChestsFcPanel extends PluginPanel
             return;
         }
 
-        if (!authorized)
+        if (mode == RogueChestsFcConfig.PluginMode.NONE)
         {
             return;
         }
 
-        refreshPartyControls();
+        if (mode == RogueChestsFcConfig.PluginMode.STAFF)
+        {
+            if (!authorized)
+            {
+                return;
+            }
 
-        rebuildList(
-                ignoredNamesList,
-                plugin.getIgnoredPlayerNames(),
-                plugin::removeIgnoredName
-        );
+            refreshPartyControls();
 
-        refreshBannedList();
+            rebuildList(
+                    ignoredNamesList,
+                    plugin.getIgnoredPlayerNames(),
+                    plugin::removeIgnoredName
+            );
+
+            refreshBannedList();
+        }
 
         rebuildList(
                 capturedNearbyNamesList,

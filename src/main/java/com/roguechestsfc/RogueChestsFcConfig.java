@@ -83,6 +83,30 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "showPartyPingBeam",
+            name = "Party ping beam",
+            description = "Show a red beam above tiles pinged through the Party plugin",
+            position = 3,
+            section = generalSection
+    )
+    default boolean showPartyPingBeam()
+    {
+        return true;
+    }
+
+    @ConfigItem(
+            keyName = "showPartyPopup",
+            name = "Party reminder",
+            description = "Show the on-screen reminder when you are not in the Party plugin party",
+            position = 4,
+            section = generalSection
+    )
+    default boolean showPartyPopup()
+    {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "showLowLevelPanel",
             name = "Show panel",
             description = "Show FC members with less than 84 Thieving",
@@ -368,6 +392,17 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "pluginMode",
+            name = "",
+            description = "",
+            hidden = true
+    )
+    default PluginMode pluginMode()
+    {
+        return PluginMode.NONE;
+    }
+
+    @ConfigItem(
             keyName = "pluginAuthorized",
             name = "",
             description = "",
@@ -398,6 +433,26 @@ public interface RogueChestsFcConfig extends Config
     default String pluginAuthorizationHash()
     {
         return "";
+    }
+
+    enum PluginMode
+    {
+        NONE("Choose Mode"),
+        STAFF("Staff Mode"),
+        THIEVER("Thiever Mode");
+
+        private final String name;
+
+        PluginMode(String name)
+        {
+            this.name = name;
+        }
+
+        @Override
+        public String toString()
+        {
+            return name;
+        }
     }
 
     enum PanelFont

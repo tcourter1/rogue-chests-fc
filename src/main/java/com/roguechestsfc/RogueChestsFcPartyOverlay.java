@@ -18,8 +18,6 @@ public class RogueChestsFcPartyOverlay extends OverlayPanel
     private static final Color TEXT_COLOR =
             Color.WHITE;
 
-    private static final int OVERLAY_WIDTH = 280;
-
     private final RogueChestsFcPlugin plugin;
 
     @Inject
@@ -36,18 +34,12 @@ public class RogueChestsFcPartyOverlay extends OverlayPanel
                 BACKGROUND_COLOR
         );
 
-        panelComponent.setPreferredSize(
-                new Dimension(
-                        OVERLAY_WIDTH,
-                        0
-                )
-        );
     }
 
     @Override
     public Dimension render(Graphics2D graphics)
     {
-        if (!plugin.shouldShowPartyJoinBanner())
+        if (!plugin.shouldShowPartyReminder())
         {
             return null;
         }
@@ -56,17 +48,36 @@ public class RogueChestsFcPartyOverlay extends OverlayPanel
 
         panelComponent.getChildren().add(
                 LineComponent.builder()
-                        .left("NOT IN PARTY PLUGIN PARTY")
+                        .left("NOT IN PARTY PLUGIN")
                         .leftColor(TEXT_COLOR)
                         .build()
         );
 
-        panelComponent.getChildren().add(
-                LineComponent.builder()
-                        .left("CLICK \"JOIN\" OR \"NOT NOW\" IN SIDE PANEL")
-                        .leftColor(TEXT_COLOR)
-                        .build()
-        );
+        if (plugin.isThieverMode())
+        {
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
+                            .left("Ask a staff member in public chat for")
+                            .leftColor(TEXT_COLOR)
+                            .build()
+            );
+
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
+                            .left("Party passphrase")
+                            .leftColor(TEXT_COLOR)
+                            .build()
+            );
+        }
+        else
+        {
+            panelComponent.getChildren().add(
+                    LineComponent.builder()
+                            .left("CLICK \"JOIN\" OR \"NOT NOW\" IN SIDE PANEL")
+                            .leftColor(TEXT_COLOR)
+                            .build()
+            );
+        }
 
         return super.render(graphics);
     }

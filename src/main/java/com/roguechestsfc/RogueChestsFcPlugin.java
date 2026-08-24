@@ -68,6 +68,7 @@ import net.runelite.client.hiscore.HiscoreResult;
 import net.runelite.client.hiscore.HiscoreSkill;
 import net.runelite.client.hiscore.Skill;
 import net.runelite.client.party.PartyService;
+import net.runelite.client.plugins.party.messages.TilePing;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -89,7 +90,16 @@ import net.runelite.http.api.worlds.WorldType;
 public class RogueChestsFcPlugin extends Plugin
 {
 	private static final String CONFIG_GROUP = "roguechestsfc";
-	private static final int ROGUES_CASTLE_REGION_ID = 13117;
+	private static final Set<Integer> TRACKING_REGION_IDS =
+			Set.of(
+					12605,
+					12861,
+					12860,
+					13116,
+					13117,
+					13373,
+					13372
+			);
 	private static final String IGNORED_NAMES_KEY = "ignoredNames";
 	private static final String BANNED_NAMES_KEY = "bannedNames";
 	private static final String CAPTURED_NEARBY_NAMES_KEY =
@@ -104,6 +114,8 @@ public class RogueChestsFcPlugin extends Plugin
 			"pluginAuthorizationVersion";
 	private static final String PARTY_KEY_MATERIAL_KEY =
 			"partyKeyMaterial";
+	private static final String PLUGIN_MODE_KEY =
+			"pluginMode";
 
 	private static final String AUTH_VERSION = "v1";
 	private static final int PBKDF2_ITERATIONS = 210_000;
@@ -219,6 +231,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private RogueChestsFcPartyOverlay partyOverlay;
 
 	@Inject
+	private RogueChestsFcPartyPingBeamOverlay partyPingBeamOverlay;
+
+	@Inject
 	private RogueChestsFcPanel panel;
 
 	@Inject
@@ -295,7 +310,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private volatile boolean suppressJoinMessages = true;
 	private volatile boolean authorizedFeaturesActive;
+	private volatile boolean staffFeaturesActive;
 	private boolean partyJoinBannerVisible;
+	private boolean partyReminderDismissedForLogin;
 
 	@Provides
 	RogueChestsFcConfig provideConfig(
@@ -326,36 +343,41 @@ public class RogueChestsFcPlugin extends Plugin
 
 		clientToolbar.addNavigation(navigationButton);
 
-		boolean authorized = isAuthorized();
-		panel.setAuthorized(authorized);
+		RogueChestsFcConfig.PluginMode mode = getPluginMode();
 
-		if (authorized)
+		panel.setModeState(
+				mode,
+				mode == RogueChestsFcConfig.PluginMode.STAFF
+						&& isAuthorized()
+		);
+
+		if (mode == RogueChestsFcConfig.PluginMode.STAFF
+				&& isAuthorized())
 		{
-			activateAuthorizedFeatures();
+			activateStaffFeatures();
+		}
+		else if (mode == RogueChestsFcConfig.PluginMode.THIEVER)
+		{
+			activateThieverFeatures();
 		}
 		else
 		{
-			clearNearbyMemberTracking();
-			equipmentScannedVisibleMembers.clear();
-
-			clientThread.invoke(
-					this::removeLevelsFromMemberList
-			);
+			clearRuntimeState();
+			clientThread.invoke(this::removeLevelsFromMemberList);
 		}
 	}
 
-	private void activateAuthorizedFeatures()
+	private void activateStaffFeatures()
 	{
-		if (authorizedFeaturesActive)
-		{
-			return;
-		}
+		deactivateModeFeatures();
 
 		authorizedFeaturesActive = true;
+		staffFeaturesActive = true;
 
 		overlayManager.add(overlay);
 		overlayManager.add(overtimeOverlay);
 		overlayManager.add(partyOverlay);
+		overlayManager.add(partyPingBeamOverlay);
 
 		suppressJoinMessages = true;
 		queueCurrentMembersWhenAvailable();
@@ -366,26 +388,48 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 	}
 
-	@Override
-	protected void shutDown()
+	private void activateThieverFeatures()
+	{
+		deactivateModeFeatures();
+
+		authorizedFeaturesActive = true;
+		staffFeaturesActive = false;
+
+		overlayManager.add(overtimeOverlay);
+		overlayManager.add(partyOverlay);
+		overlayManager.add(partyPingBeamOverlay);
+
+		suppressJoinMessages = true;
+		queueCurrentMembersForThieverMode();
+
+		if (client.getGameState() == GameState.LOGGED_IN)
+		{
+			updatePartyJoinBannerForLogin();
+		}
+	}
+
+	private void deactivateModeFeatures()
 	{
 		if (authorizedFeaturesActive)
 		{
 			overlayManager.remove(overlay);
 			overlayManager.remove(overtimeOverlay);
 			overlayManager.remove(partyOverlay);
-			authorizedFeaturesActive = false;
+			overlayManager.remove(partyPingBeamOverlay);
 		}
 
-		if (navigationButton != null)
-		{
-			clientToolbar.removeNavigation(
-					navigationButton
-			);
+		partyPingBeamOverlay.clearPings();
+		authorizedFeaturesActive = false;
+		staffFeaturesActive = false;
+		partyJoinBannerVisible = false;
+		partyReminderDismissedForLogin = false;
 
-			navigationButton = null;
-		}
+		clearRuntimeState();
+		clientThread.invoke(this::removeLevelsFromMemberList);
+	}
 
+	private void clearRuntimeState()
+	{
 		lookupQueue.clear();
 		pendingLookups.clear();
 		pendingJoinMessages.clear();
@@ -399,13 +443,21 @@ public class RogueChestsFcPlugin extends Plugin
 		unrankedF2pMembers.clear();
 		clearNearbyMemberTracking();
 		equipmentScannedVisibleMembers.clear();
-		clearCapturedNearbyNames();
-
 		suppressJoinMessages = true;
+	}
 
-		clientThread.invoke(
-				this::removeLevelsFromMemberList
-		);
+	@Override
+	protected void shutDown()
+	{
+		deactivateModeFeatures();
+
+		if (navigationButton != null)
+		{
+			clientToolbar.removeNavigation(navigationButton);
+			navigationButton = null;
+		}
+
+		clearCapturedNearbyNames();
 	}
 
 	@Subscribe
@@ -424,7 +476,15 @@ public class RogueChestsFcPlugin extends Plugin
 			suppressJoinMessages = true;
 			pendingJoinMessages.clear();
 			pendingF2pJoinMessages.clear();
-			queueCurrentMembersWhenAvailable();
+
+			if (staffFeaturesActive)
+			{
+				queueCurrentMembersWhenAvailable();
+			}
+			else
+			{
+				queueCurrentMembersForThieverMode();
+			}
 		}
 		else
 		{
@@ -473,6 +533,11 @@ public class RogueChestsFcPlugin extends Plugin
 
 		currentMembers.add(normalizedName);
 		removeCapturedNearbyName(playerName);
+
+		if (!staffFeaturesActive)
+		{
+			return;
+		}
 
 		boolean unrankedF2p =
 				updateF2pMemberState(member);
@@ -573,20 +638,22 @@ public class RogueChestsFcPlugin extends Plugin
 				normalizeName(member.getName());
 
 		currentMembers.remove(normalizedName);
+		removeNearbyMemberTracking(normalizedName);
+
+		if (!staffFeaturesActive)
+		{
+			return;
+		}
+
 		unrankedF2pMembers.remove(normalizedName);
 		pendingJoinMessages.remove(normalizedName);
 		pendingF2pJoinMessages.remove(normalizedName);
 		equipmentScannedVisibleMembers.remove(normalizedName);
-		removeNearbyMemberTracking(normalizedName);
 
-		LowLevelMember lowLevelMember =
-				lowLevelMembers.get(normalizedName);
-
+		LowLevelMember lowLevelMember = lowLevelMembers.get(normalizedName);
 		if (lowLevelMember != null)
 		{
-			lowLevelMember.setDepartedAt(
-					Instant.now()
-			);
+			lowLevelMember.setDepartedAt(Instant.now());
 		}
 	}
 
@@ -643,20 +710,21 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
-		for (int i = 0; i < LOOKUPS_PER_TICK; i++)
+		if (staffFeaturesActive)
 		{
-			String normalizedName =
-					lookupQueue.poll();
-
-			if (normalizedName == null)
+			for (int i = 0; i < LOOKUPS_PER_TICK; i++)
 			{
-				break;
+				String normalizedName = lookupQueue.poll();
+				if (normalizedName == null)
+				{
+					break;
+				}
+				startLookup(normalizedName);
 			}
 
-			startLookup(normalizedName);
+			removeExpiredDepartedMembers();
 		}
 
-		removeExpiredDepartedMembers();
 		removeExpiredCapturedNearbyNames();
 		updateNearbyMemberTracking();
 	}
@@ -672,13 +740,16 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
+			partyReminderDismissedForLogin = false;
 			updatePartyJoinBannerForLogin();
 			return;
 		}
 
 		partyJoinBannerVisible = false;
+		partyReminderDismissedForLogin = false;
 		panel.refresh();
 
+		partyPingBeamOverlay.clearPings();
 		clearNearbyMemberTracking();
 		equipmentScannedVisibleMembers.clear();
 	}
@@ -687,7 +758,7 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onPostClientTick(
 			PostClientTick ignored)
 	{
-		if (!authorizedFeaturesActive)
+		if (!authorizedFeaturesActive || !staffFeaturesActive)
 		{
 			return;
 		}
@@ -708,15 +779,35 @@ public class RogueChestsFcPlugin extends Plugin
 				== ScriptID.FRIENDS_CHAT_CHANNEL_REBUILD)
 		{
 			reconcileFriendsChatMembers();
-			refreshF2pMemberStates();
-			applyLevelsToMemberList();
+
+			if (staffFeaturesActive)
+			{
+				refreshF2pMemberStates();
+				applyLevelsToMemberList();
+			}
 		}
+	}
+
+	@Subscribe
+	public void onTilePing(TilePing event)
+	{
+		if (!authorizedFeaturesActive
+				|| !config.showPartyPingBeam()
+				|| event == null
+				|| event.getPoint() == null)
+		{
+			return;
+		}
+
+		partyPingBeamOverlay.addPing(
+				event.getPoint()
+		);
 	}
 
 	@Subscribe
 	public void onMenuOpened(MenuOpened event)
 	{
-		if (!authorizedFeaturesActive)
+		if (!authorizedFeaturesActive || !staffFeaturesActive)
 		{
 			return;
 		}
@@ -756,6 +847,97 @@ public class RogueChestsFcPlugin extends Plugin
 						addIgnoredNames(playerName));
 	}
 
+	RogueChestsFcConfig.PluginMode getPluginMode()
+	{
+		RogueChestsFcConfig.PluginMode mode = config.pluginMode();
+		return mode == null
+				? RogueChestsFcConfig.PluginMode.NONE
+				: mode;
+	}
+
+	boolean isStaffMode()
+	{
+		return getPluginMode() == RogueChestsFcConfig.PluginMode.STAFF;
+	}
+
+	boolean isThieverMode()
+	{
+		return getPluginMode() == RogueChestsFcConfig.PluginMode.THIEVER;
+	}
+
+	void setPluginMode(RogueChestsFcConfig.PluginMode mode)
+	{
+		RogueChestsFcConfig.PluginMode selected =
+				mode == null
+						? RogueChestsFcConfig.PluginMode.NONE
+						: mode;
+
+		RogueChestsFcConfig.PluginMode current =
+				getPluginMode();
+
+		if (current == selected)
+		{
+			boolean authorized =
+					selected
+							== RogueChestsFcConfig.PluginMode.STAFF
+							&& isAuthorized();
+
+			panel.setModeState(
+					selected,
+					authorized
+			);
+
+			return;
+		}
+
+		deactivateModeFeatures();
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				PLUGIN_MODE_KEY,
+				selected
+		);
+
+		boolean authorized =
+				selected
+						== RogueChestsFcConfig.PluginMode.STAFF
+						&& isAuthorized();
+
+		panel.setModeState(
+				selected,
+				authorized
+		);
+
+		if (selected
+				== RogueChestsFcConfig.PluginMode.STAFF)
+		{
+			if (authorized)
+			{
+				activateStaffFeatures();
+			}
+		}
+		else if (selected
+				== RogueChestsFcConfig.PluginMode.THIEVER)
+		{
+			activateThieverFeatures();
+		}
+	}
+
+	boolean isStaffFeaturesActive()
+	{
+		return authorizedFeaturesActive
+				&& staffFeaturesActive
+				&& isStaffMode()
+				&& isAuthorized();
+	}
+
+	boolean isThieverFeaturesActive()
+	{
+		return authorizedFeaturesActive
+				&& !staffFeaturesActive
+				&& isThieverMode();
+	}
+
 	boolean isAuthorized()
 	{
 		return config.pluginAuthorized()
@@ -766,7 +948,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 	boolean authorize(String passcode)
 	{
-		if (passcode == null || passcode.isEmpty())
+		if (!isStaffMode() || passcode == null || passcode.isEmpty())
 		{
 			return false;
 		}
@@ -852,7 +1034,12 @@ public class RogueChestsFcPlugin extends Plugin
 				Arrays.fill(partyKey, (byte) 0);
 			}
 
-			activateAuthorizedFeatures();
+			activateStaffFeatures();
+
+			panel.setModeState(
+					RogueChestsFcConfig.PluginMode.STAFF,
+					true
+			);
 
 			return true;
 		}
@@ -980,7 +1167,7 @@ public class RogueChestsFcPlugin extends Plugin
 	private void updatePartyJoinBannerForLogin()
 	{
 		partyJoinBannerVisible =
-				authorizedFeaturesActive
+				isStaffFeaturesActive()
 						&& !partyService.isInParty();
 
 		panel.refresh();
@@ -988,21 +1175,30 @@ public class RogueChestsFcPlugin extends Plugin
 
 	boolean shouldShowPartyJoinBanner()
 	{
-		return authorizedFeaturesActive
+		return isStaffFeaturesActive()
 				&& partyJoinBannerVisible
+				&& !partyService.isInParty();
+	}
+
+	boolean shouldShowPartyReminder()
+	{
+		return authorizedFeaturesActive
+				&& config.showPartyPopup()
+				&& !partyReminderDismissedForLogin
 				&& !partyService.isInParty();
 	}
 
 	void dismissPartyJoinBanner()
 	{
 		partyJoinBannerVisible = false;
+		partyReminderDismissedForLogin = true;
 		panel.refresh();
 	}
 
 
 	void joinStaffParty()
 	{
-		if (!authorizedFeaturesActive)
+		if (!isStaffFeaturesActive())
 		{
 			return;
 		}
@@ -1026,6 +1222,7 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			partyJoinBannerVisible = false;
+			partyReminderDismissedForLogin = true;
 			panel.refresh();
 		}
 		catch (RuntimeException exception)
@@ -1039,7 +1236,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 	void leaveStaffParty()
 	{
-		if (!authorizedFeaturesActive)
+		if (!isStaffFeaturesActive())
 		{
 			return;
 		}
@@ -1052,6 +1249,7 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			partyJoinBannerVisible = false;
+			partyReminderDismissedForLogin = true;
 			panel.refresh();
 		}
 		catch (RuntimeException exception)
@@ -1065,7 +1263,7 @@ public class RogueChestsFcPlugin extends Plugin
 
 	boolean isInParty()
 	{
-		return authorizedFeaturesActive
+		return isStaffFeaturesActive()
 				&& partyService.isInParty();
 	}
 
@@ -1736,7 +1934,8 @@ public class RogueChestsFcPlugin extends Plugin
 			String normalizedName,
 			String playerName)
 	{
-		if (!config.showMissingEquipmentWarning()
+		if (!isStaffFeaturesActive()
+				|| !config.showMissingEquipmentWarning()
 				|| getEquipmentInspectionIgnoredNames().contains(
 				normalizedName
 		)
@@ -1971,8 +2170,9 @@ public class RogueChestsFcPlugin extends Plugin
 		Player localPlayer = client.getLocalPlayer();
 
 		return localPlayer != null
-				&& localPlayer.getWorldLocation().getRegionID()
-				== ROGUES_CASTLE_REGION_ID;
+				&& TRACKING_REGION_IDS.contains(
+				localPlayer.getWorldLocation().getRegionID()
+		);
 	}
 
 	private void addConfiguredNames(
@@ -2168,6 +2368,11 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private void refreshConfiguredPlayerLists()
 	{
+		if (!isStaffFeaturesActive())
+		{
+			return;
+		}
+
 		clientThread.invoke(() ->
 		{
 			Set<String> bannedNames =
@@ -2306,6 +2511,50 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		return "";
+	}
+
+	private void queueCurrentMembersForThieverMode()
+	{
+		clientThread.invokeLater(() ->
+		{
+			if (!isThieverFeaturesActive())
+			{
+				return true;
+			}
+
+			FriendsChatManager manager = client.getFriendsChatManager();
+			if (manager == null)
+			{
+				return true;
+			}
+
+			FriendsChatMember[] members = manager.getMembers();
+			if (members == null || members.length == 0)
+			{
+				return false;
+			}
+
+			Set<String> loadedMembers = new HashSet<>();
+			for (FriendsChatMember member : members)
+			{
+				if (member == null)
+				{
+					continue;
+				}
+
+				String normalizedName = normalizeName(member.getName());
+				if (!normalizedName.isEmpty())
+				{
+					loadedMembers.add(normalizedName);
+					currentMembers.add(normalizedName);
+				}
+			}
+
+			removeCurrentMembersFromCapturedList(loadedMembers);
+			currentMembers.retainAll(loadedMembers);
+			suppressJoinMessages = false;
+			return true;
+		});
 	}
 
 	private void queueCurrentMembersWhenAvailable()
