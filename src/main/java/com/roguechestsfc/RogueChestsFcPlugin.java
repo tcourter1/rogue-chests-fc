@@ -311,6 +311,7 @@ public class RogueChestsFcPlugin extends Plugin
 	private volatile boolean suppressJoinMessages = true;
 	private volatile boolean authorizedFeaturesActive;
 	private volatile boolean staffFeaturesActive;
+	private volatile boolean modeSwitchInProgress;
 	private boolean partyJoinBannerVisible;
 	private boolean partyReminderDismissedForLogin;
 
@@ -425,7 +426,11 @@ public class RogueChestsFcPlugin extends Plugin
 		partyReminderDismissedForLogin = false;
 
 		clearRuntimeState();
-		clientThread.invoke(this::removeLevelsFromMemberList);
+		clientThread.invokeLater(() ->
+		{
+			removeLevelsFromMemberList();
+			return true;
+		});
 	}
 
 	private void clearRuntimeState()
@@ -500,9 +505,11 @@ public class RogueChestsFcPlugin extends Plugin
 			lowLevelMembers.clear();
 			equipmentScannedVisibleMembers.clear();
 
-			clientThread.invoke(
-					this::removeLevelsFromMemberList
-			);
+			clientThread.invokeLater(() ->
+			{
+				removeLevelsFromMemberList();
+				return true;
+			});
 		}
 	}
 
@@ -865,8 +872,14 @@ public class RogueChestsFcPlugin extends Plugin
 		return getPluginMode() == RogueChestsFcConfig.PluginMode.THIEVER;
 	}
 
-	void setPluginMode(RogueChestsFcConfig.PluginMode mode)
+	void setPluginMode(
+			RogueChestsFcConfig.PluginMode mode)
 	{
+		if (modeSwitchInProgress)
+		{
+			return;
+		}
+
 		RogueChestsFcConfig.PluginMode selected =
 				mode == null
 						? RogueChestsFcConfig.PluginMode.NONE
@@ -877,20 +890,15 @@ public class RogueChestsFcPlugin extends Plugin
 
 		if (current == selected)
 		{
-			boolean authorized =
-					selected
-							== RogueChestsFcConfig.PluginMode.STAFF
-							&& isAuthorized();
-
 			panel.setModeState(
 					selected,
-					authorized
+					selected == RogueChestsFcConfig.PluginMode.STAFF
+							&& isAuthorized()
 			);
-
 			return;
 		}
 
-		deactivateModeFeatures();
+		modeSwitchInProgress = true;
 
 		configManager.setConfiguration(
 				CONFIG_GROUP,
@@ -898,9 +906,28 @@ public class RogueChestsFcPlugin extends Plugin
 				selected
 		);
 
+		clientThread.invokeLater(() ->
+		{
+			try
+			{
+				applyPluginMode(selected);
+			}
+			finally
+			{
+				modeSwitchInProgress = false;
+			}
+
+			return true;
+		});
+	}
+
+	private void applyPluginMode(
+			RogueChestsFcConfig.PluginMode selected)
+	{
+		deactivateModeFeatures();
+
 		boolean authorized =
-				selected
-						== RogueChestsFcConfig.PluginMode.STAFF
+				selected == RogueChestsFcConfig.PluginMode.STAFF
 						&& isAuthorized();
 
 		panel.setModeState(
@@ -908,16 +935,14 @@ public class RogueChestsFcPlugin extends Plugin
 				authorized
 		);
 
-		if (selected
-				== RogueChestsFcConfig.PluginMode.STAFF)
+		if (selected == RogueChestsFcConfig.PluginMode.STAFF)
 		{
 			if (authorized)
 			{
 				activateStaffFeatures();
 			}
 		}
-		else if (selected
-				== RogueChestsFcConfig.PluginMode.THIEVER)
+		else if (selected == RogueChestsFcConfig.PluginMode.THIEVER)
 		{
 			activateThieverFeatures();
 		}
@@ -1034,12 +1059,17 @@ public class RogueChestsFcPlugin extends Plugin
 				Arrays.fill(partyKey, (byte) 0);
 			}
 
-			activateStaffFeatures();
+			clientThread.invokeLater(() ->
+			{
+				activateStaffFeatures();
 
-			panel.setModeState(
-					RogueChestsFcConfig.PluginMode.STAFF,
-					true
-			);
+				panel.setModeState(
+						RogueChestsFcConfig.PluginMode.STAFF,
+						true
+				);
+
+				return true;
+			});
 
 			return true;
 		}
