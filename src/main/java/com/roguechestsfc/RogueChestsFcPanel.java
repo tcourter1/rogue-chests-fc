@@ -6,6 +6,9 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import javax.inject.Inject;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -35,6 +38,10 @@ public class RogueChestsFcPanel extends PluginPanel
     private static final int PLAYER_ROW_HEIGHT = 30;
     private static final int BUTTON_HEIGHT = 30;
     private static final int SCROLLBAR_SIZE = 7;
+    private static final DateTimeFormatter SYNC_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("h:mm a")
+                    .withZone(ZoneId.systemDefault());
+
 
     private static final String CONFIG_GROUP = "roguechestsfc";
     private static final String COLLAPSED_KEY_PREFIX =
@@ -61,6 +68,8 @@ public class RogueChestsFcPanel extends PluginPanel
     private final JPanel partyControlsContainer = new JPanel();
     private final JPasswordField passcodeField = new JPasswordField();
     private final JLabel unlockStatusLabel = new JLabel();
+
+    private final JLabel banSyncStatusLabel = new JLabel();
 
     private final JTextArea ignoredNamesInput = new JTextArea();
     private final JTextArea bannedNamesInput = new JTextArea();
@@ -850,6 +859,15 @@ public class RogueChestsFcPanel extends PluginPanel
                 this::confirmClearBannedNames
         );
 
+        JButton syncButton = createButton(
+                "Sync Now",
+                plugin::syncBanListNow
+        );
+
+        configureFullWidthButton(syncButton);
+
+        configureBanSyncStatusLabel();
+
         JPanel firstActionRow = createButtonRow(
                 addButton,
                 searchButton
@@ -872,13 +890,101 @@ public class RogueChestsFcPanel extends PluginPanel
         content.add(Box.createRigidArea(new Dimension(0, 5)));
         content.add(secondActionRow);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
+        content.add(syncButton);
+        content.add(Box.createRigidArea(new Dimension(0, 5)));
+        content.add(banSyncStatusLabel);
+        content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(listScrollPane);
+
+        updateBanSyncStatus();
 
         return createCollapsibleSection(
                 BANNED_SECTION_KEY,
                 "Banned Players",
                 content
         );
+    }
+
+    private void configureBanSyncStatusLabel()
+    {
+        banSyncStatusLabel.setForeground(
+                ColorScheme.LIGHT_GRAY_COLOR
+        );
+        banSyncStatusLabel.setAlignmentX(
+                Component.LEFT_ALIGNMENT
+        );
+        banSyncStatusLabel.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        22
+                )
+        );
+    }
+
+    private void updateBanSyncStatus()
+    {
+        if (plugin.isBanListSyncInProgress())
+        {
+            banSyncStatusLabel.setForeground(
+                    ColorScheme.BRAND_ORANGE
+            );
+            banSyncStatusLabel.setText(
+                    "Syncing ban list..."
+            );
+            return;
+        }
+
+        Instant lastSync =
+                plugin.getLastBanListSync();
+
+        String lastError =
+                plugin.getLastBanListSyncError();
+
+        if (lastError != null
+                && !lastError.trim().isEmpty())
+        {
+            banSyncStatusLabel.setForeground(
+                    Color.RED
+            );
+
+            if (lastSync == null)
+            {
+                banSyncStatusLabel.setText(
+                        "Sync failed - not synced this session"
+                );
+            }
+            else
+            {
+                banSyncStatusLabel.setText(
+                        "Sync failed - last synced: "
+                                + SYNC_TIME_FORMAT.format(
+                                lastSync
+                        )
+                );
+            }
+
+            return;
+        }
+
+        banSyncStatusLabel.setForeground(
+                ColorScheme.LIGHT_GRAY_COLOR
+        );
+
+        if (lastSync == null)
+        {
+            banSyncStatusLabel.setText(
+                    "Last synced: Not this session"
+            );
+        }
+        else
+        {
+            banSyncStatusLabel.setText(
+                    "Last synced: "
+                            + SYNC_TIME_FORMAT.format(
+                            lastSync
+                    )
+            );
+        }
     }
 
     private JPanel createCapturedNearbyNamesSection()
@@ -1504,6 +1610,7 @@ public class RogueChestsFcPanel extends PluginPanel
             );
 
             refreshBannedList();
+            updateBanSyncStatus();
         }
 
         rebuildList(

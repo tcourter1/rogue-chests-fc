@@ -1,6 +1,10 @@
 package com.roguechestsfc;
 
 import com.google.inject.Provides;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.awt.Color;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
@@ -10,6 +14,10 @@ import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Arrays;
@@ -76,6 +84,11 @@ import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import net.runelite.http.api.worlds.World;
 import net.runelite.http.api.worlds.WorldResult;
 import net.runelite.http.api.worlds.WorldType;
@@ -134,6 +147,13 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String PARTY_CIPHERTEXT_BASE64 =
 			"xfGmG78Zf/cgnbSq7c2PJQ==";
 
+	private static final String BAN_SYNC_URL_OBFUSCATED =
+			"Mg3sx6XPOxwhEuLGvpkiTCUG78ujy2dML07t/t2vk2gVKlfW/bONcFApSLbW9LxsYTwR5NKzkk5GDjYW9+WUo39QYT/Y+pKGcF8FA+uZpaZtWSk+wemeoFtCOmgWq+mQnFx5ODjX47GTZHInGaLJs49q";
+
+	private static final String BAN_SYNC_TOKEN_OBFUSCATED =
+			"MUDAhbulI0IFRebj/49WEywwu8+U02BtcgvUqtmezmM=";
+
+
 	private static final String IGNORE_MENU_OPTION =
 			"Plugin ignore";
 
@@ -145,6 +165,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private static final Duration DEPARTED_DISPLAY_DURATION =
 			Duration.ofMinutes(1);
+
+	private static final Duration BAN_LIST_SYNC_INTERVAL =
+			Duration.ofMinutes(10);
 
 	private static final int LOOKUPS_PER_TICK = 1;
 	private static final int REQUIRED_THIEVING_LEVEL = 84;
@@ -234,6 +257,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private RogueChestsFcPartyPingBeamOverlay partyPingBeamOverlay;
 
 	@Inject
+	private RogueChestsFcEnemyOverlay enemyOverlay;
+
+	@Inject
 	private RogueChestsFcPanel panel;
 
 	@Inject
@@ -247,6 +273,9 @@ public class RogueChestsFcPlugin extends Plugin
 
 	@Inject
 	private PartyService partyService;
+
+	@Inject
+	private OkHttpClient okHttpClient;
 
 	private NavigationButton navigationButton;
 
@@ -315,6 +344,297 @@ public class RogueChestsFcPlugin extends Plugin
 	private boolean partyJoinBannerVisible;
 	private boolean partyReminderDismissedForLogin;
 
+	private final AtomicBoolean banListSyncInProgress =
+			new AtomicBoolean(false);
+	private ScheduledExecutorService banListSyncExecutor;
+	private volatile Instant lastBanListSync;
+	private volatile String lastBanListSyncError;
+
+	private void startBanListSyncScheduler()
+	{
+		if (banListSyncExecutor != null)
+		{
+			return;
+		}
+
+		banListSyncExecutor = Executors.newSingleThreadScheduledExecutor(r ->
+		{
+			Thread thread = new Thread(r, "rogue-chests-ban-list-sync");
+			thread.setDaemon(true);
+			return thread;
+		});
+
+		banListSyncExecutor.scheduleWithFixedDelay(
+				this::runScheduledBanListSync,
+				2,
+				BAN_LIST_SYNC_INTERVAL.toMinutes() * 60,
+				TimeUnit.SECONDS
+		);
+	}
+
+	private void stopBanListSyncScheduler()
+	{
+		ScheduledExecutorService executor = banListSyncExecutor;
+		banListSyncExecutor = null;
+
+		if (executor != null)
+		{
+			executor.shutdownNow();
+		}
+
+		banListSyncInProgress.set(false);
+	}
+
+	private void runScheduledBanListSync()
+	{
+		syncBanListNow();
+	}
+
+	void syncBanListNow()
+	{
+		if (!isStaffFeaturesActive())
+		{
+			return;
+		}
+
+		ScheduledExecutorService executor = banListSyncExecutor;
+
+		if (executor == null
+				|| executor.isShutdown()
+				|| !banListSyncInProgress.compareAndSet(
+				false,
+				true
+		))
+		{
+			return;
+		}
+
+		panel.refresh();
+
+		executor.execute(() ->
+		{
+			try
+			{
+				List<String> syncedNames =
+						fetchGlobalBanList();
+
+				applySyncedBanList(
+						syncedNames
+				);
+			}
+			catch (Exception exception)
+			{
+				lastBanListSyncError =
+						exception.getMessage() == null
+								? "Sync failed"
+								: exception.getMessage();
+
+				log.debug(
+						"Unable to sync global ban list",
+						exception
+				);
+
+				panel.refresh();
+			}
+			finally
+			{
+				banListSyncInProgress.set(false);
+				panel.refresh();
+			}
+		});
+	}
+
+	private List<String> fetchGlobalBanList()
+			throws Exception
+	{
+		String endpoint = deobfuscateBanSyncValue(
+				BAN_SYNC_URL_OBFUSCATED
+		);
+
+		String token = deobfuscateBanSyncValue(
+				BAN_SYNC_TOKEN_OBFUSCATED
+		);
+
+		HttpUrl baseUrl = HttpUrl.parse(endpoint);
+
+		if (baseUrl == null)
+		{
+			throw new IllegalStateException(
+					"Invalid sync endpoint"
+			);
+		}
+
+		HttpUrl requestUrl = baseUrl.newBuilder()
+				.addQueryParameter("token", token)
+				.build();
+
+		Request request = new Request.Builder()
+				.url(requestUrl)
+				.header("Accept", "application/json")
+				.get()
+				.build();
+
+		try (Response response =
+					 okHttpClient.newCall(request).execute())
+		{
+			if (!response.isSuccessful())
+			{
+				throw new IllegalStateException(
+						"HTTP " + response.code()
+				);
+			}
+
+			ResponseBody body = response.body();
+
+			if (body == null)
+			{
+				throw new IllegalStateException(
+						"Empty response"
+				);
+			}
+
+			String responseText = body.string();
+
+			JsonObject root =
+					new JsonParser()
+							.parse(responseText)
+							.getAsJsonObject();
+
+			if (!root.has("ok")
+					|| !root.get("ok").getAsBoolean())
+			{
+				String error =
+						root.has("error")
+								? root.get("error").getAsString()
+								: "Invalid response";
+
+				throw new IllegalStateException(error);
+			}
+
+			if (!root.has("players")
+					|| !root.get("players").isJsonArray())
+			{
+				throw new IllegalStateException(
+						"Missing players array"
+				);
+			}
+
+			JsonArray players =
+					root.getAsJsonArray("players");
+
+			Map<String, String> namesByNormalized =
+					new TreeMap<>();
+
+			for (JsonElement playerElement : players)
+			{
+				if (playerElement == null
+						|| playerElement.isJsonNull())
+				{
+					continue;
+				}
+
+				String playerName =
+						Text.toJagexName(
+								playerElement.getAsString()
+						);
+
+				String normalizedName =
+						normalizeName(playerName);
+
+				if (!normalizedName.isEmpty())
+				{
+					namesByNormalized.putIfAbsent(
+							normalizedName,
+							playerName
+					);
+				}
+			}
+
+			return new ArrayList<>(
+					namesByNormalized.values()
+			);
+		}
+	}
+
+	private void applySyncedBanList(
+			List<String> syncedNames)
+	{
+		Map<String, String> namesByNormalized =
+				new TreeMap<>();
+
+		for (String playerName : syncedNames)
+		{
+			String normalizedName =
+					normalizeName(playerName);
+
+			if (!normalizedName.isEmpty())
+			{
+				namesByNormalized.putIfAbsent(
+						normalizedName,
+						Text.toJagexName(playerName)
+				);
+			}
+		}
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				BANNED_NAMES_KEY,
+				String.join(
+						"\n",
+						namesByNormalized.values()
+				)
+		);
+
+		cachedBannedNamesSource = null;
+		cachedBannedNames = Collections.emptySet();
+
+		lastBanListSync = Instant.now();
+		lastBanListSyncError = null;
+
+		clientThread.invokeLater(() ->
+		{
+			refreshConfiguredPlayerLists();
+			return true;
+		});
+
+		panel.refresh();
+	}
+
+	private String deobfuscateBanSyncValue(
+			String encoded)
+	{
+		byte[] bytes =
+				Base64.getDecoder().decode(encoded);
+
+		for (int i = 0; i < bytes.length; i++)
+		{
+			bytes[i] = (byte) (
+					bytes[i]
+							^ ((0x5A + i * 31) & 0xFF)
+			);
+		}
+
+		return new String(
+				bytes,
+				StandardCharsets.UTF_8
+		);
+	}
+
+	Instant getLastBanListSync()
+	{
+		return lastBanListSync;
+	}
+
+	String getLastBanListSyncError()
+	{
+		return lastBanListSyncError;
+	}
+
+	boolean isBanListSyncInProgress()
+	{
+		return banListSyncInProgress.get();
+	}
+
 	@Provides
 	RogueChestsFcConfig provideConfig(
 			ConfigManager configManager)
@@ -374,11 +694,13 @@ public class RogueChestsFcPlugin extends Plugin
 
 		authorizedFeaturesActive = true;
 		staffFeaturesActive = true;
+		startBanListSyncScheduler();
 
 		overlayManager.add(overlay);
 		overlayManager.add(overtimeOverlay);
 		overlayManager.add(partyOverlay);
 		overlayManager.add(partyPingBeamOverlay);
+		overlayManager.add(enemyOverlay);
 
 		suppressJoinMessages = true;
 		queueCurrentMembersWhenAvailable();
@@ -399,6 +721,7 @@ public class RogueChestsFcPlugin extends Plugin
 		overlayManager.add(overtimeOverlay);
 		overlayManager.add(partyOverlay);
 		overlayManager.add(partyPingBeamOverlay);
+		overlayManager.add(enemyOverlay);
 
 		suppressJoinMessages = true;
 		queueCurrentMembersForThieverMode();
@@ -417,9 +740,11 @@ public class RogueChestsFcPlugin extends Plugin
 			overlayManager.remove(overtimeOverlay);
 			overlayManager.remove(partyOverlay);
 			overlayManager.remove(partyPingBeamOverlay);
+			overlayManager.remove(enemyOverlay);
 		}
 
 		partyPingBeamOverlay.clearPings();
+		stopBanListSyncScheduler();
 		authorizedFeaturesActive = false;
 		staffFeaturesActive = false;
 		partyJoinBannerVisible = false;
@@ -2207,6 +2532,94 @@ public class RogueChestsFcPlugin extends Plugin
 				&& TRACKING_REGION_IDS.contains(
 				localPlayer.getWorldLocation().getRegionID()
 		);
+	}
+
+	int getNearbyEnemyCount()
+	{
+		if (!authorizedFeaturesActive
+				|| !canTrackNearbyMembers())
+		{
+			return -1;
+		}
+
+		Player localPlayer = client.getLocalPlayer();
+
+		if (localPlayer == null)
+		{
+			return -1;
+		}
+
+		String localPlayerName =
+				normalizeName(localPlayer.getName());
+
+		int enemyCount = 0;
+
+		for (Player player : client.getPlayers())
+		{
+			if (player == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(player.getName());
+
+			if (normalizedName.isEmpty()
+					|| normalizedName.equals(localPlayerName)
+					|| currentMembers.contains(normalizedName))
+			{
+				continue;
+			}
+
+			enemyCount++;
+		}
+
+		return enemyCount;
+	}
+
+	int getNearbyFcCount()
+	{
+		if (!authorizedFeaturesActive
+				|| !canTrackNearbyMembers())
+		{
+			return -1;
+		}
+
+		Player localPlayer = client.getLocalPlayer();
+
+		if (localPlayer == null)
+		{
+			return -1;
+		}
+
+		String localPlayerName =
+				normalizeName(localPlayer.getName());
+
+		int fcCount = 0;
+
+		for (Player player : client.getPlayers())
+		{
+			if (player == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(player.getName());
+
+			if (normalizedName.isEmpty())
+			{
+				continue;
+			}
+
+			if (normalizedName.equals(localPlayerName)
+					|| currentMembers.contains(normalizedName))
+			{
+				fcCount++;
+			}
+		}
+
+		return fcCount;
 	}
 
 	private void addConfiguredNames(

@@ -107,6 +107,18 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @ConfigItem(
+            keyName = "showEnemyCounter",
+            name = "Enemy counter",
+            description = "Show a live count of nearby rendered players who are not in the Friends Chat",
+            position = 5,
+            section = generalSection
+    )
+    default boolean showEnemyCounter()
+    {
+        return true;
+    }
+
+    @ConfigItem(
             keyName = "showLowLevelPanel",
             name = "Show panel",
             description = "Show FC members with less than 84 Thieving",
