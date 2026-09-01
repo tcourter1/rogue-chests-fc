@@ -147,11 +147,11 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String PARTY_CIPHERTEXT_BASE64 =
 			"xfGmG78Zf/cgnbSq7c2PJQ==";
 
-	private static final String BAN_SYNC_URL_OBFUSCATED =
-			"Mg3sx6XPOxwhEuLGvpkiTCUG78ujy2dML07t/t2vk2gVKlfW/bONcFApSLbW9LxsYTwR5NKzkk5GDjYW9+WUo39QYT/Y+pKGcF8FA+uZpaZtWSk+wemeoFtCOmgWq+mQnFx5ODjX47GTZHInGaLJs49q";
+	private static final String BAN_SYNC_URL =
+			"https://script.google.com/macros/s/AKfycbx89x9PgKuyctvvMdOViiXHXei9HNOFubnUle4iMgpaYGLZCYcz7h6UKfEAoNBWbauBhw/exec";
 
-	private static final String BAN_SYNC_TOKEN_OBFUSCATED =
-			"MUDAhbulI0IFRebj/49WEywwu8+U02BtcgvUqtmezmM=";
+	private static final String BAN_SYNC_TOKEN =
+			"k9X2mP7qW4vL1bZ8fY3hR6dN0jT5gC2x";
 
 
 	private static final String IGNORE_MENU_OPTION =
@@ -447,15 +447,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private List<String> fetchGlobalBanList()
 			throws Exception
 	{
-		String endpoint = deobfuscateBanSyncValue(
-				BAN_SYNC_URL_OBFUSCATED
+		HttpUrl baseUrl = HttpUrl.parse(
+				BAN_SYNC_URL
 		);
-
-		String token = deobfuscateBanSyncValue(
-				BAN_SYNC_TOKEN_OBFUSCATED
-		);
-
-		HttpUrl baseUrl = HttpUrl.parse(endpoint);
 
 		if (baseUrl == null)
 		{
@@ -465,7 +459,10 @@ public class RogueChestsFcPlugin extends Plugin
 		}
 
 		HttpUrl requestUrl = baseUrl.newBuilder()
-				.addQueryParameter("token", token)
+				.addQueryParameter(
+						"token",
+						BAN_SYNC_TOKEN
+				)
 				.build();
 
 		Request request = new Request.Builder()
@@ -598,26 +595,6 @@ public class RogueChestsFcPlugin extends Plugin
 		});
 
 		panel.refresh();
-	}
-
-	private String deobfuscateBanSyncValue(
-			String encoded)
-	{
-		byte[] bytes =
-				Base64.getDecoder().decode(encoded);
-
-		for (int i = 0; i < bytes.length; i++)
-		{
-			bytes[i] = (byte) (
-					bytes[i]
-							^ ((0x5A + i * 31) & 0xFF)
-			);
-		}
-
-		return new String(
-				bytes,
-				StandardCharsets.UTF_8
-		);
 	}
 
 	Instant getLastBanListSync()
