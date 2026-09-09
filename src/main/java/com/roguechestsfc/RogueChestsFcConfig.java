@@ -139,7 +139,7 @@ public interface RogueChestsFcConfig extends Config
     )
     default PanelFont panelFont()
     {
-        return PanelFont.DEFAULT;
+        return PanelFont.ARIAL;
     }
 
     @Range(
@@ -155,7 +155,7 @@ public interface RogueChestsFcConfig extends Config
     )
     default int panelFontSize()
     {
-        return 14;
+        return 11;
     }
 
     @ConfigItem(
@@ -264,7 +264,7 @@ public interface RogueChestsFcConfig extends Config
     )
     default PanelFont overtimePanelFont()
     {
-        return PanelFont.DEFAULT;
+        return PanelFont.ARIAL;
     }
 
     @Range(
@@ -280,7 +280,7 @@ public interface RogueChestsFcConfig extends Config
     )
     default int overtimePanelFontSize()
     {
-        return 14;
+        return 11;
     }
 
     @ConfigItem(

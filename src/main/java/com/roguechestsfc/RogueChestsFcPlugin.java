@@ -31,10 +31,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import javax.crypto.Cipher;
-import javax.crypto.SecretKeyFactory;
-import javax.crypto.spec.IvParameterSpec;
-import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
@@ -45,8 +42,6 @@ import net.runelite.api.FriendsChatMember;
 import net.runelite.api.FriendsChatRank;
 import net.runelite.api.GameState;
 import net.runelite.api.ItemComposition;
-import net.runelite.api.MenuAction;
-import net.runelite.api.MenuEntry;
 import net.runelite.api.Player;
 import net.runelite.api.PlayerComposition;
 import net.runelite.api.ScriptID;
@@ -55,7 +50,6 @@ import net.runelite.api.events.FriendsChatMemberJoined;
 import net.runelite.api.events.FriendsChatMemberLeft;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
-import net.runelite.api.events.MenuOpened;
 import net.runelite.api.events.PlayerSpawned;
 import net.runelite.api.events.PostClientTick;
 import net.runelite.api.events.ScriptPostFired;
@@ -103,6 +97,7 @@ import net.runelite.http.api.worlds.WorldType;
 public class RogueChestsFcPlugin extends Plugin
 {
 	private static final String CONFIG_GROUP = "roguechestsfc";
+	private static final String REQUIRED_FRIENDS_CHAT = "Rogue Chests";
 	private static final Set<Integer> TRACKING_REGION_IDS =
 			Set.of(
 					12605,
@@ -121,31 +116,22 @@ public class RogueChestsFcPlugin extends Plugin
 			"capturedNearbyNameTimes";
 	private static final String OVERTIME_WHITELIST_NAMES_KEY =
 			"overtimeWhitelistNames";
-	private static final String PLUGIN_AUTHORIZED_KEY =
-			"pluginAuthorized";
-	private static final String PLUGIN_AUTHORIZATION_VERSION_KEY =
-			"pluginAuthorizationVersion";
-	private static final String PARTY_KEY_MATERIAL_KEY =
-			"partyKeyMaterial";
+	private static final String PARTY_SYNC_VERSION_KEY =
+			"partySyncVersion";
+	private static final String PARTY_SYNC_NONCE_KEY =
+			"partySyncNonce";
+	private static final String PARTY_SYNC_CIPHERTEXT_KEY =
+			"partySyncCiphertext";
+	private static final String PARTY_SYNC_MAC_KEY =
+			"partySyncMac";
 	private static final String PLUGIN_MODE_KEY =
 			"pluginMode";
 
-	private static final String AUTH_VERSION = "v1";
-	private static final int PBKDF2_ITERATIONS = 210_000;
-	private static final int PBKDF2_KEY_LENGTH_BITS = 256;
-	private static final String PASSCODE_SALT_BASE64 =
-			"JmZfBxHllFhmOpmv4oPJDw==";
-	private static final String PASSCODE_HASH_BASE64 =
-			"KhuLOfFNZPUpyUVlqmrX+Z4jGkprFOxjpGHs6awQ8bw=";
+	private static final String PARTY_SYNC_ALGORITHM =
+			"HMAC-SHA256-STREAM-v1";
 
-	private static final int PARTY_PBKDF2_ITERATIONS = 210_000;
-	private static final int PARTY_KEY_LENGTH_BITS = 256;
-	private static final String PARTY_KEY_SALT_BASE64 =
-			"o6jGz3myGiyA3Fd4soS2hQ==";
-	private static final String PARTY_IV_BASE64 =
-			"I9Sv9X/mfvN//A/jxLmu0Q==";
-	private static final String PARTY_CIPHERTEXT_BASE64 =
-			"xfGmG78Zf/cgnbSq7c2PJQ==";
+	private static final String PARTY_SYNC_ROOT_KEY_BASE64 =
+			"jtlLqKn/LpgI7uXh7/Y2ASkxVjs9seqWWHFv33Lp934=";
 
 	private static final String BAN_SYNC_URL =
 			"https://script.google.com/macros/s/AKfycbx89x9PgKuyctvvMdOViiXHXei9HNOFubnUle4iMgpaYGLZCYcz7h6UKfEAoNBWbauBhw/exec";
@@ -153,9 +139,6 @@ public class RogueChestsFcPlugin extends Plugin
 	private static final String BAN_SYNC_TOKEN =
 			"k9X2mP7qW4vL1bZ8fY3hR6dN0jT5gC2x";
 
-
-	private static final String IGNORE_MENU_OPTION =
-			"Plugin ignore";
 
 	private static final Duration LOOKUP_COOLDOWN =
 			Duration.ofMinutes(2);
@@ -171,6 +154,8 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private static final int LOOKUPS_PER_TICK = 1;
 	private static final int REQUIRED_THIEVING_LEVEL = 84;
+	private static final int RAT_WATCH_THIEVING_WORLD_FC_THRESHOLD = 10;
+	private static final int RAT_WATCH_HIT_OUTSIDER_THRESHOLD = 6;
 
 	private static final KitType[] VISIBLE_EQUIPMENT_SLOTS =
 			{
@@ -297,6 +282,9 @@ public class RogueChestsFcPlugin extends Plugin
 	private final Set<String> currentMembers =
 			ConcurrentHashMap.newKeySet();
 
+	private final RogueChestsFcRatWatch ratWatch =
+			new RogueChestsFcRatWatch();
+
 	private final Set<String> unrankedF2pMembers =
 			ConcurrentHashMap.newKeySet();
 
@@ -415,11 +403,11 @@ public class RogueChestsFcPlugin extends Plugin
 		{
 			try
 			{
-				List<String> syncedNames =
-						fetchGlobalBanList();
+				SyncedPlayerLists syncedLists =
+						fetchGlobalLists();
 
-				applySyncedBanList(
-						syncedNames
+				applySyncedLists(
+						syncedLists
 				);
 			}
 			catch (Exception exception)
@@ -430,7 +418,7 @@ public class RogueChestsFcPlugin extends Plugin
 								: exception.getMessage();
 
 				log.debug(
-						"Unable to sync global ban list",
+						"Unable to sync global lists",
 						exception
 				);
 
@@ -444,7 +432,7 @@ public class RogueChestsFcPlugin extends Plugin
 		});
 	}
 
-	private List<String> fetchGlobalBanList()
+	private SyncedPlayerLists fetchGlobalLists()
 			throws Exception
 	{
 		HttpUrl baseUrl = HttpUrl.parse(
@@ -516,51 +504,114 @@ public class RogueChestsFcPlugin extends Plugin
 				);
 			}
 
-			JsonArray players =
-					root.getAsJsonArray("players");
-
-			Map<String, String> namesByNormalized =
-					new TreeMap<>();
-
-			for (JsonElement playerElement : players)
+			if (!root.has("under84Players")
+					|| !root.get("under84Players").isJsonArray())
 			{
-				if (playerElement == null
-						|| playerElement.isJsonNull())
-				{
-					continue;
-				}
-
-				String playerName =
-						Text.toJagexName(
-								playerElement.getAsString()
-						);
-
-				String normalizedName =
-						normalizeName(playerName);
-
-				if (!normalizedName.isEmpty())
-				{
-					namesByNormalized.putIfAbsent(
-							normalizedName,
-							playerName
-					);
-				}
+				throw new IllegalStateException(
+						"Missing under84Players array"
+				);
 			}
 
-			return new ArrayList<>(
-					namesByNormalized.values()
+			if (!root.has("party")
+					|| !root.get("party").isJsonObject())
+			{
+				throw new IllegalStateException(
+						"Missing party object"
+				);
+			}
+
+			return new SyncedPlayerLists(
+					parseSyncedPlayerArray(
+							root.getAsJsonArray("players")
+					),
+					parseSyncedPlayerArray(
+							root.getAsJsonArray("under84Players")
+					),
+					parseSyncedPartyCredential(
+							root.getAsJsonObject("party")
+					)
 			);
 		}
 	}
 
-	private void applySyncedBanList(
-			List<String> syncedNames)
+	private SyncedPartyCredential parseSyncedPartyCredential(
+			JsonObject party)
+	{
+		if (!party.has("version"))
+		{
+			throw new IllegalStateException(
+					"Missing Party version"
+			);
+		}
+
+		int version = party.get("version").getAsInt();
+
+		boolean available =
+				!party.has("available")
+						|| party.get("available").getAsBoolean();
+
+		String algorithm =
+				party.has("algorithm")
+						? party.get("algorithm").getAsString()
+						: PARTY_SYNC_ALGORITHM;
+
+		if (!PARTY_SYNC_ALGORITHM.equals(algorithm))
+		{
+			throw new IllegalStateException(
+					"Unsupported Party sync algorithm"
+			);
+		}
+
+		if (!available)
+		{
+			return new SyncedPartyCredential(
+					version,
+					false,
+					algorithm,
+					null,
+					null,
+					null
+			);
+		}
+
+		if (!party.has("nonce")
+				|| !party.has("ciphertext")
+				|| !party.has("mac"))
+		{
+			throw new IllegalStateException(
+					"Incomplete Party credential"
+			);
+		}
+
+		return new SyncedPartyCredential(
+				version,
+				true,
+				algorithm,
+				party.get("nonce").getAsString(),
+				party.get("ciphertext").getAsString(),
+				party.get("mac").getAsString()
+		);
+	}
+
+	private List<String> parseSyncedPlayerArray(
+			JsonArray players)
 	{
 		Map<String, String> namesByNormalized =
 				new TreeMap<>();
 
-		for (String playerName : syncedNames)
+		for (JsonElement playerElement : players)
 		{
+			if (playerElement == null
+					|| playerElement.isJsonNull())
+			{
+				continue;
+			}
+
+			String playerName =
+					Text.toJagexName(
+							playerElement.getAsString()
+					);
+
 			String normalizedName =
 					normalizeName(playerName);
 
@@ -568,22 +619,46 @@ public class RogueChestsFcPlugin extends Plugin
 			{
 				namesByNormalized.putIfAbsent(
 						normalizedName,
-						Text.toJagexName(playerName)
+						playerName
 				);
 			}
 		}
+
+		return new ArrayList<>(
+				namesByNormalized.values()
+		);
+	}
+
+	private void applySyncedLists(
+			SyncedPlayerLists syncedLists)
+			throws GeneralSecurityException
+	{
+		applySyncedPartyCredential(
+				syncedLists.getPartyCredential()
+		);
 
 		configManager.setConfiguration(
 				CONFIG_GROUP,
 				BANNED_NAMES_KEY,
 				String.join(
 						"\n",
-						namesByNormalized.values()
+						syncedLists.getBannedNames()
+				)
+		);
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				IGNORED_NAMES_KEY,
+				String.join(
+						"\n",
+						syncedLists.getIgnoredNames()
 				)
 		);
 
 		cachedBannedNamesSource = null;
 		cachedBannedNames = Collections.emptySet();
+		cachedIgnoredNamesSource = null;
+		cachedIgnoredNames = Collections.emptySet();
 
 		lastBanListSync = Instant.now();
 		lastBanListSyncError = null;
@@ -667,6 +742,12 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private void activateStaffFeatures()
 	{
+		if (!isInRequiredFriendsChat() || !isAuthorized())
+		{
+			deactivateModeFeatures();
+			return;
+		}
+
 		deactivateModeFeatures();
 
 		authorizedFeaturesActive = true;
@@ -690,6 +771,12 @@ public class RogueChestsFcPlugin extends Plugin
 
 	private void activateThieverFeatures()
 	{
+		if (!isInRequiredFriendsChat())
+		{
+			deactivateModeFeatures();
+			return;
+		}
+
 		deactivateModeFeatures();
 
 		authorizedFeaturesActive = true;
@@ -771,7 +858,14 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onFriendsChatChanged(
 			FriendsChatChanged event)
 	{
-		if (!authorizedFeaturesActive)
+		clientThread.invokeLater(() ->
+		{
+			reconcileFriendsChatAccess();
+			return true;
+		});
+
+		if (!authorizedFeaturesActive
+				|| !isInRequiredFriendsChat())
 		{
 			return;
 		}
@@ -842,6 +936,15 @@ public class RogueChestsFcPlugin extends Plugin
 
 		currentMembers.add(normalizedName);
 		removeCapturedNearbyName(playerName);
+
+		if (staffFeaturesActive
+				&& isRatWatchEligible(member))
+		{
+			ratWatch.onJoin(
+					playerName,
+					Instant.now()
+			);
+		}
 
 		if (!staffFeaturesActive)
 		{
@@ -946,6 +1049,22 @@ public class RogueChestsFcPlugin extends Plugin
 		String normalizedName =
 				normalizeName(member.getName());
 
+		if (staffFeaturesActive
+				&& isRatWatchEligible(member))
+		{
+			RatWatchNearbySnapshot snapshot =
+					getRatWatchNearbySnapshot();
+
+			ratWatch.onLeave(
+					member.getName(),
+					Instant.now(),
+					snapshot.visibleFcMembers.contains(
+							normalizedName
+					),
+					snapshot.likelyThievingWorld
+			);
+		}
+
 		currentMembers.remove(normalizedName);
 		removeNearbyMemberTracking(normalizedName);
 
@@ -1014,6 +1133,8 @@ public class RogueChestsFcPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick ignored)
 	{
+		reconcileFriendsChatAccess();
+
 		if (!authorizedFeaturesActive)
 		{
 			return;
@@ -1032,6 +1153,7 @@ public class RogueChestsFcPlugin extends Plugin
 			}
 
 			removeExpiredDepartedMembers();
+			updateRatWatch();
 		}
 
 		removeExpiredCapturedNearbyNames();
@@ -1047,8 +1169,14 @@ public class RogueChestsFcPlugin extends Plugin
 			return;
 		}
 
+		if (event.getGameState() == GameState.HOPPING)
+		{
+			clearCapturedNearbyNames();
+		}
+
 		if (event.getGameState() == GameState.LOGGED_IN)
 		{
+			clearCapturedNearbyNames();
 			updatePartyJoinBannerForLogin();
 			return;
 		}
@@ -1117,47 +1245,56 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
-	@Subscribe
-	public void onMenuOpened(MenuOpened event)
+	private void reconcileFriendsChatAccess()
 	{
-		if (!authorizedFeaturesActive || !staffFeaturesActive)
+		RogueChestsFcConfig.PluginMode mode =
+				getPluginMode();
+
+		boolean inRequiredChat =
+				isInRequiredFriendsChat();
+
+		boolean shouldBeStaff =
+				inRequiredChat
+						&& mode == RogueChestsFcConfig.PluginMode.STAFF
+						&& isAuthorized();
+
+		boolean shouldBeThiever =
+				inRequiredChat
+						&& mode == RogueChestsFcConfig.PluginMode.THIEVER;
+
+		if (shouldBeStaff)
 		{
+			if (!authorizedFeaturesActive
+					|| !staffFeaturesActive)
+			{
+				activateStaffFeatures();
+				panel.setModeState(mode, true);
+			}
+
 			return;
 		}
 
-		String playerName =
-				findFriendsChatPlayerInMenu(
-						event.getMenuEntries()
-				);
-
-		if (playerName.isEmpty())
+		if (shouldBeThiever)
 		{
+			if (!authorizedFeaturesActive
+					|| staffFeaturesActive)
+			{
+				activateThieverFeatures();
+				panel.setModeState(mode, false);
+			}
+
 			return;
 		}
 
-		String normalizedName =
-				normalizeName(playerName);
-
-		if (normalizedName.isEmpty()
-				|| !currentMembers.contains(normalizedName)
-				|| getIgnoredNames().contains(
-				normalizedName
-		))
+		if (authorizedFeaturesActive)
 		{
-			return;
+			deactivateModeFeatures();
 		}
 
-		client.getMenu()
-				.createMenuEntry(1)
-				.setOption(IGNORE_MENU_OPTION)
-				.setTarget(
-						"<col=ff9040>"
-								+ playerName
-								+ "</col>"
-				)
-				.setType(MenuAction.RUNELITE)
-				.onClick(menuEntry ->
-						addIgnoredNames(playerName));
+		panel.setModeState(
+				mode,
+				false
+		);
 	}
 
 	RogueChestsFcConfig.PluginMode getPluginMode()
@@ -1257,6 +1394,7 @@ public class RogueChestsFcPlugin extends Plugin
 	boolean isStaffFeaturesActive()
 	{
 		return authorizedFeaturesActive
+				&& isInRequiredFriendsChat()
 				&& staffFeaturesActive
 				&& isStaffMode()
 				&& isAuthorized();
@@ -1265,238 +1403,429 @@ public class RogueChestsFcPlugin extends Plugin
 	boolean isThieverFeaturesActive()
 	{
 		return authorizedFeaturesActive
+				&& isInRequiredFriendsChat()
 				&& !staffFeaturesActive
 				&& isThieverMode();
 	}
 
 	boolean isAuthorized()
 	{
-		return config.pluginAuthorized()
-				&& AUTH_VERSION.equals(
-				config.pluginAuthorizationVersion()
+		return isStaffRankAuthorized();
+	}
+
+	private boolean isInRequiredFriendsChat()
+	{
+		FriendsChatManager manager =
+				client.getFriendsChatManager();
+
+		if (manager == null
+				|| manager.getName() == null)
+		{
+			return false;
+		}
+
+		return normalizeName(
+				REQUIRED_FRIENDS_CHAT
+		).equals(
+				normalizeName(
+						manager.getName()
+				)
 		);
 	}
 
-	boolean authorize(String passcode)
+	private boolean isStaffRankAuthorized()
 	{
-		if (!isStaffMode() || passcode == null || passcode.isEmpty())
+		if (!isInRequiredFriendsChat())
 		{
 			return false;
 		}
 
-		char[] passcodeChars = passcode.toCharArray();
+		FriendsChatManager manager =
+				client.getFriendsChatManager();
 
-		try
+		FriendsChatRank rank =
+				manager == null
+						? null
+						: manager.getMyRank();
+
+		if (rank == null)
 		{
-			byte[] salt = Base64.getDecoder().decode(
-					PASSCODE_SALT_BASE64
-			);
+			return false;
+		}
 
-			byte[] expectedHash = Base64.getDecoder().decode(
-					PASSCODE_HASH_BASE64
-			);
-
-			PBEKeySpec keySpec = new PBEKeySpec(
-					passcodeChars,
-					salt,
-					PBKDF2_ITERATIONS,
-					PBKDF2_KEY_LENGTH_BITS
-			);
-
-			byte[] actualHash;
-
-			try
-			{
-				SecretKeyFactory keyFactory =
-						SecretKeyFactory.getInstance(
-								"PBKDF2WithHmacSHA256"
-						);
-
-				actualHash = keyFactory
-						.generateSecret(keySpec)
-						.getEncoded();
-			}
-			finally
-			{
-				keySpec.clearPassword();
-			}
-
-			boolean matches = MessageDigest.isEqual(
-					expectedHash,
-					actualHash
-			);
-
-			Arrays.fill(actualHash, (byte) 0);
-
-			if (!matches)
-			{
-				return false;
-			}
-
-			configManager.setConfiguration(
-					CONFIG_GROUP,
-					PLUGIN_AUTHORIZED_KEY,
-					true
-			);
-
-			byte[] partyKey = derivePartyKey(
-					passcodeChars
-			);
-
-			try
-			{
-				configManager.setConfiguration(
-						CONFIG_GROUP,
-						PLUGIN_AUTHORIZATION_VERSION_KEY,
-						AUTH_VERSION
-				);
-
-				configManager.setConfiguration(
-						CONFIG_GROUP,
-						PARTY_KEY_MATERIAL_KEY,
-						Base64.getEncoder()
-								.encodeToString(
-										partyKey
-								)
-				);
-			}
-			finally
-			{
-				Arrays.fill(partyKey, (byte) 0);
-			}
-
-			clientThread.invokeLater(() ->
-			{
-				activateStaffFeatures();
-
-				panel.setModeState(
-						RogueChestsFcConfig.PluginMode.STAFF,
-						true
-				);
-
+		switch (rank)
+		{
+			case LIEUTENANT:
+			case CAPTAIN:
+			case GENERAL:
+			case OWNER:
 				return true;
-			});
-
-			return true;
-		}
-		catch (GeneralSecurityException
-		       | IllegalArgumentException exception)
-		{
-			log.error(
-					"Unable to verify plugin passcode",
-					exception
-			);
-
-			return false;
-		}
-		finally
-		{
-			Arrays.fill(passcodeChars, '\0');
+			default:
+				return false;
 		}
 	}
 
-	private byte[] derivePartyKey(
-			char[] passcodeChars)
+	private void applySyncedPartyCredential(
+			SyncedPartyCredential credential)
 			throws GeneralSecurityException
 	{
-		byte[] salt = Base64.getDecoder().decode(
-				PARTY_KEY_SALT_BASE64
+		if (credential == null)
+		{
+			throw new GeneralSecurityException(
+					"Missing Party credential"
+			);
+		}
+
+		if (!credential.isAvailable())
+		{
+			configManager.setConfiguration(
+					CONFIG_GROUP,
+					PARTY_SYNC_VERSION_KEY,
+					Integer.toString(
+							credential.getVersion()
+					)
+			);
+
+			configManager.unsetConfiguration(
+					CONFIG_GROUP,
+					PARTY_SYNC_NONCE_KEY
+			);
+
+			configManager.unsetConfiguration(
+					CONFIG_GROUP,
+					PARTY_SYNC_CIPHERTEXT_KEY
+			);
+
+			configManager.unsetConfiguration(
+					CONFIG_GROUP,
+					PARTY_SYNC_MAC_KEY
+			);
+
+			return;
+		}
+
+		String decrypted =
+				decryptPartyCredential(
+						credential
+				);
+
+		if (decrypted == null
+				|| decrypted.isEmpty())
+		{
+			throw new GeneralSecurityException(
+					"Party credential decrypted to an empty value"
+			);
+		}
+
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				PARTY_SYNC_VERSION_KEY,
+				Integer.toString(
+						credential.getVersion()
+				)
 		);
 
-		PBEKeySpec keySpec = new PBEKeySpec(
-				passcodeChars,
-				salt,
-				PARTY_PBKDF2_ITERATIONS,
-				PARTY_KEY_LENGTH_BITS
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				PARTY_SYNC_NONCE_KEY,
+				credential.getNonce()
 		);
 
-		try
-		{
-			SecretKeyFactory keyFactory =
-					SecretKeyFactory.getInstance(
-							"PBKDF2WithHmacSHA256"
-					);
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				PARTY_SYNC_CIPHERTEXT_KEY,
+				credential.getCiphertext()
+		);
 
-			return keyFactory
-					.generateSecret(keySpec)
-					.getEncoded();
-		}
-		finally
-		{
-			keySpec.clearPassword();
-		}
+		configManager.setConfiguration(
+				CONFIG_GROUP,
+				PARTY_SYNC_MAC_KEY,
+				credential.getMac()
+		);
 	}
 
 	private String decryptPartyPassphrase()
 	{
-		String encodedKey =
+		String versionText =
 				configManager.getConfiguration(
 						CONFIG_GROUP,
-						PARTY_KEY_MATERIAL_KEY
+						PARTY_SYNC_VERSION_KEY
 				);
 
-		if (encodedKey == null
-				|| encodedKey.trim().isEmpty())
+		String nonce =
+				configManager.getConfiguration(
+						CONFIG_GROUP,
+						PARTY_SYNC_NONCE_KEY
+				);
+
+		String ciphertext =
+				configManager.getConfiguration(
+						CONFIG_GROUP,
+						PARTY_SYNC_CIPHERTEXT_KEY
+				);
+
+		String mac =
+				configManager.getConfiguration(
+						CONFIG_GROUP,
+						PARTY_SYNC_MAC_KEY
+				);
+
+		if (versionText == null
+				|| nonce == null
+				|| ciphertext == null
+				|| mac == null)
 		{
 			return null;
 		}
 
-		byte[] key = null;
-		byte[] decrypted = null;
-
 		try
 		{
-			key = Base64.getDecoder().decode(
-					encodedKey
-			);
-
-			byte[] iv = Base64.getDecoder().decode(
-					PARTY_IV_BASE64
-			);
-
-			byte[] ciphertext =
-					Base64.getDecoder().decode(
-							PARTY_CIPHERTEXT_BASE64
+			int version =
+					Integer.parseInt(
+							versionText
 					);
 
-			Cipher cipher = Cipher.getInstance(
-					"AES/CBC/PKCS5Padding"
-			);
-
-			cipher.init(
-					Cipher.DECRYPT_MODE,
-					new SecretKeySpec(key, "AES"),
-					new IvParameterSpec(iv)
-			);
-
-			decrypted = cipher.doFinal(ciphertext);
-
-			return new String(
-					decrypted,
-					StandardCharsets.UTF_8
+			return decryptPartyCredential(
+					new SyncedPartyCredential(
+							version,
+							true,
+							PARTY_SYNC_ALGORITHM,
+							nonce,
+							ciphertext,
+							mac
+					)
 			);
 		}
 		catch (GeneralSecurityException
 		       | IllegalArgumentException exception)
 		{
 			log.debug(
-					"Unable to decrypt Party passphrase",
+					"Unable to decrypt synced Party passphrase",
 					exception
 			);
 
 			return null;
 		}
-		finally
+	}
+
+	private String decryptPartyCredential(
+			SyncedPartyCredential credential)
+			throws GeneralSecurityException
+	{
+		return decryptPartyCredentialWithKey(
+				credential,
+				PARTY_SYNC_ROOT_KEY_BASE64
+		);
+	}
+
+	private String decryptPartyCredentialWithKey(
+			SyncedPartyCredential credential,
+			String encodedRootKey)
+			throws GeneralSecurityException
+	{
+		byte[] rootKey = null;
+		byte[] encryptionKey = null;
+		byte[] authenticationKey = null;
+		byte[] nonce = null;
+		byte[] ciphertext = null;
+		byte[] plaintext = null;
+
+		try
 		{
-			if (key != null)
+			rootKey = Base64.getDecoder().decode(
+					encodedRootKey
+			);
+
+			nonce = Base64.getDecoder().decode(
+					credential.getNonce()
+			);
+
+			ciphertext = Base64.getDecoder().decode(
+					credential.getCiphertext()
+			);
+
+			byte[] suppliedMac =
+					Base64.getDecoder().decode(
+							credential.getMac()
+					);
+
+			encryptionKey = hmacSha256(
+					rootKey,
+					"party-sync-encryption"
+							.getBytes(
+									StandardCharsets.UTF_8
+							)
+			);
+
+			authenticationKey = hmacSha256(
+					rootKey,
+					"party-sync-authentication"
+							.getBytes(
+									StandardCharsets.UTF_8
+							)
+			);
+
+			String macMessage =
+					credential.getVersion()
+							+ "|"
+							+ credential.getNonce()
+							+ "|"
+							+ credential.getCiphertext();
+
+			byte[] expectedMac =
+					hmacSha256(
+							authenticationKey,
+							macMessage.getBytes(
+									StandardCharsets.UTF_8
+							)
+					);
+
+			if (!MessageDigest.isEqual(
+					expectedMac,
+					suppliedMac
+			))
 			{
-				Arrays.fill(key, (byte) 0);
+				throw new GeneralSecurityException(
+						"Party credential authentication failed"
+				);
 			}
 
-			if (decrypted != null)
+			plaintext = cryptPartyBytes(
+					ciphertext,
+					encryptionKey,
+					nonce
+			);
+
+			return new String(
+					plaintext,
+					StandardCharsets.UTF_8
+			);
+		}
+		catch (IllegalArgumentException exception)
+		{
+			throw new GeneralSecurityException(
+					"Invalid Party credential encoding",
+					exception
+			);
+		}
+		finally
+		{
+			wipe(rootKey);
+			wipe(encryptionKey);
+			wipe(authenticationKey);
+			wipe(nonce);
+			wipe(ciphertext);
+			wipe(plaintext);
+		}
+	}
+
+	private byte[] cryptPartyBytes(
+			byte[] input,
+			byte[] encryptionKey,
+			byte[] nonce)
+			throws GeneralSecurityException
+	{
+		byte[] output =
+				new byte[input.length];
+
+		int offset = 0;
+		int counter = 1;
+
+		while (offset < input.length)
+		{
+			byte[] blockInput =
+					new byte[
+							nonce.length + 4
+							];
+
+			System.arraycopy(
+					nonce,
+					0,
+					blockInput,
+					0,
+					nonce.length
+			);
+
+			int counterOffset =
+					nonce.length;
+
+			blockInput[counterOffset] =
+					(byte) (
+							counter >>> 24
+					);
+
+			blockInput[counterOffset + 1] =
+					(byte) (
+							counter >>> 16
+					);
+
+			blockInput[counterOffset + 2] =
+					(byte) (
+							counter >>> 8
+					);
+
+			blockInput[counterOffset + 3] =
+					(byte) counter;
+
+			byte[] keystream =
+					hmacSha256(
+							encryptionKey,
+							blockInput
+					);
+
+			try
 			{
-				Arrays.fill(decrypted, (byte) 0);
+				for (int index = 0;
+				     index < keystream.length
+							 && offset < input.length;
+				     index++, offset++)
+				{
+					output[offset] =
+							(byte) (
+									input[offset]
+											^ keystream[index]
+							);
+				}
 			}
+			finally
+			{
+				wipe(keystream);
+				wipe(blockInput);
+			}
+
+			counter++;
+		}
+
+		return output;
+	}
+
+	private byte[] hmacSha256(
+			byte[] key,
+			byte[] data)
+			throws GeneralSecurityException
+	{
+		Mac mac = Mac.getInstance(
+				"HmacSHA256"
+		);
+
+		mac.init(
+				new SecretKeySpec(
+						key,
+						"HmacSHA256"
+				)
+		);
+
+		return mac.doFinal(data);
+	}
+
+	private void wipe(byte[] value)
+	{
+		if (value != null)
+		{
+			Arrays.fill(
+					value,
+					(byte) 0
+			);
 		}
 	}
 
@@ -1632,24 +1961,6 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 	}
 
-	void addIgnoredNames(String names)
-	{
-		addConfiguredNames(
-				IGNORED_NAMES_KEY,
-				config.ignoredNames(),
-				names
-		);
-	}
-
-	void addBannedNames(String names)
-	{
-		addConfiguredNames(
-				BANNED_NAMES_KEY,
-				config.bannedNames(),
-				names
-		);
-	}
-
 	void addOvertimeWhitelistNames(String names)
 	{
 		addConfiguredNames(
@@ -1665,33 +1976,6 @@ public class RogueChestsFcPlugin extends Plugin
 					normalizedName
 			);
 		});
-	}
-
-	void removeIgnoredName(String playerName)
-	{
-		removeConfiguredName(
-				IGNORED_NAMES_KEY,
-				config.ignoredNames(),
-				playerName
-		);
-	}
-
-	void removeBannedName(String playerName)
-	{
-		removeConfiguredName(
-				BANNED_NAMES_KEY,
-				config.bannedNames(),
-				playerName
-		);
-	}
-
-	void clearBannedNames()
-	{
-		saveConfiguredNames(
-				BANNED_NAMES_KEY,
-				new TreeMap<>(),
-				true
-		);
 	}
 
 	void removeOvertimeWhitelistName(String playerName)
@@ -1745,25 +2029,6 @@ public class RogueChestsFcPlugin extends Plugin
 		);
 
 		panel.refresh();
-	}
-
-	void addCapturedNearbyNamesToBanList()
-	{
-		List<String> capturedNames =
-				getCapturedNearbyPlayerNames();
-
-		if (capturedNames.isEmpty())
-		{
-			return;
-		}
-
-		addConfiguredNames(
-				BANNED_NAMES_KEY,
-				config.bannedNames(),
-				String.join("\n", capturedNames)
-		);
-
-		clearCapturedNearbyNames();
 	}
 
 	void copyIgnoredNames()
@@ -2263,6 +2528,165 @@ public class RogueChestsFcPlugin extends Plugin
 				removeNearbyMemberTracking(normalizedName);
 			}
 		}
+	}
+
+	private void updateRatWatch()
+	{
+		if (!isStaffFeaturesActive())
+		{
+			return;
+		}
+
+		Instant now = Instant.now();
+		ratWatch.onTick(now);
+
+		RatWatchNearbySnapshot snapshot =
+				getRatWatchNearbySnapshot();
+
+		if (!snapshot.likelyThievingWorld
+				|| snapshot.outsiderCount
+				< RAT_WATCH_HIT_OUTSIDER_THRESHOLD)
+		{
+			return;
+		}
+
+		if (ratWatch.onHit(
+				now,
+				snapshot.visibleFcMembers
+		))
+		{
+			panel.refresh();
+		}
+	}
+
+	private RatWatchNearbySnapshot
+	getRatWatchNearbySnapshot()
+	{
+		if (!isStaffFeaturesActive()
+				|| !canTrackNearbyMembers())
+		{
+			return RatWatchNearbySnapshot.EMPTY;
+		}
+
+		Player localPlayer = client.getLocalPlayer();
+
+		if (localPlayer == null)
+		{
+			return RatWatchNearbySnapshot.EMPTY;
+		}
+
+		String localPlayerName =
+				normalizeName(
+						localPlayer.getName()
+				);
+
+		Set<String> visibleFcMembers =
+				new HashSet<>();
+
+		int nearbyFcCount = 0;
+		int outsiderCount = 0;
+
+		for (Player player : client.getPlayers())
+		{
+			if (player == null)
+			{
+				continue;
+			}
+
+			String normalizedName =
+					normalizeName(
+							player.getName()
+					);
+
+			if (normalizedName.isEmpty())
+			{
+				continue;
+			}
+
+			if (normalizedName.equals(
+					localPlayerName
+			))
+			{
+				nearbyFcCount++;
+				continue;
+			}
+
+			if (currentMembers.contains(
+					normalizedName
+			))
+			{
+				nearbyFcCount++;
+				visibleFcMembers.add(
+						normalizedName
+				);
+			}
+			else
+			{
+				outsiderCount++;
+			}
+		}
+
+		return new RatWatchNearbySnapshot(
+				visibleFcMembers,
+				nearbyFcCount,
+				outsiderCount,
+				nearbyFcCount
+						>= RAT_WATCH_THIEVING_WORLD_FC_THRESHOLD
+		);
+	}
+
+	private boolean isRatWatchEligible(
+			FriendsChatMember member)
+	{
+		if (!isStaffFeaturesActive()
+				|| member == null
+				|| member.getRank()
+				!= FriendsChatRank.UNRANKED)
+		{
+			return false;
+		}
+
+		String normalizedName =
+				normalizeName(
+						member.getName()
+				);
+
+		return !normalizedName.isEmpty()
+				&& !getIgnoredNames().contains(
+				normalizedName
+		)
+				&& !getBannedNames().contains(
+				normalizedName
+		);
+	}
+
+	List<RogueChestsFcRatWatch.RatWatchEntry>
+	getRatWatchEntries()
+	{
+		if (!isStaffFeaturesActive())
+		{
+			return Collections.emptyList();
+		}
+
+		return ratWatch.getEntries(
+				Instant.now()
+		);
+	}
+
+	void dismissRatWatchPlayer(
+			String playerName)
+	{
+		if (!isStaffFeaturesActive())
+		{
+			return;
+		}
+
+		ratWatch.dismiss(
+				playerName,
+				Instant.now()
+		);
+
+		panel.refresh();
 	}
 
 	private void scanEquipmentIfNeeded(
@@ -2900,41 +3324,6 @@ public class RogueChestsFcPlugin extends Plugin
 		).compareTo(
 				JOIN_MESSAGE_COOLDOWN
 		) >= 0;
-	}
-
-	private String findFriendsChatPlayerInMenu(
-			MenuEntry[] menuEntries)
-	{
-		if (menuEntries == null)
-		{
-			return "";
-		}
-
-		for (MenuEntry menuEntry : menuEntries)
-		{
-			if (menuEntry == null)
-			{
-				continue;
-			}
-
-			String playerName =
-					extractPlayerName(
-							menuEntry.getTarget()
-					);
-
-			String normalizedName =
-					normalizeName(playerName);
-
-			if (!normalizedName.isEmpty()
-					&& currentMembers.contains(
-					normalizedName
-			))
-			{
-				return playerName;
-			}
-		}
-
-		return "";
 	}
 
 	private void queueCurrentMembersForThieverMode()
@@ -3809,25 +4198,6 @@ public class RogueChestsFcPlugin extends Plugin
 				});
 	}
 
-	private String extractPlayerName(
-			String target)
-	{
-		if (target == null
-				|| target.trim().isEmpty())
-		{
-			return "";
-		}
-
-		String withoutFormatting =
-				removePluginFormatting(target);
-
-		return Text.toJagexName(
-				Text.removeTags(
-						withoutFormatting
-				)
-		);
-	}
-
 	private void markMemberDeparted(
 			String normalizedName)
 	{
@@ -4469,6 +4839,126 @@ public class RogueChestsFcPlugin extends Plugin
 		).toLowerCase(Locale.ROOT);
 	}
 
+
+	private static class RatWatchNearbySnapshot
+	{
+		private static final RatWatchNearbySnapshot EMPTY =
+				new RatWatchNearbySnapshot(
+						Collections.emptySet(),
+						0,
+						0,
+						false
+				);
+
+		private final Set<String> visibleFcMembers;
+		private final int nearbyFcCount;
+		private final int outsiderCount;
+		private final boolean likelyThievingWorld;
+
+		RatWatchNearbySnapshot(
+				Set<String> visibleFcMembers,
+				int nearbyFcCount,
+				int outsiderCount,
+				boolean likelyThievingWorld)
+		{
+			this.visibleFcMembers =
+					new HashSet<>(
+							visibleFcMembers
+					);
+			this.nearbyFcCount = nearbyFcCount;
+			this.outsiderCount = outsiderCount;
+			this.likelyThievingWorld =
+					likelyThievingWorld;
+		}
+	}
+
+	private static class SyncedPlayerLists
+	{
+		private final List<String> bannedNames;
+		private final List<String> ignoredNames;
+		private final SyncedPartyCredential partyCredential;
+
+		SyncedPlayerLists(
+				List<String> bannedNames,
+				List<String> ignoredNames,
+				SyncedPartyCredential partyCredential)
+		{
+			this.bannedNames = bannedNames;
+			this.ignoredNames = ignoredNames;
+			this.partyCredential = partyCredential;
+		}
+
+		List<String> getBannedNames()
+		{
+			return bannedNames;
+		}
+
+		List<String> getIgnoredNames()
+		{
+			return ignoredNames;
+		}
+
+		SyncedPartyCredential getPartyCredential()
+		{
+			return partyCredential;
+		}
+	}
+
+	private static class SyncedPartyCredential
+	{
+		private final int version;
+		private final boolean available;
+		private final String algorithm;
+		private final String nonce;
+		private final String ciphertext;
+		private final String mac;
+
+		SyncedPartyCredential(
+				int version,
+				boolean available,
+				String algorithm,
+				String nonce,
+				String ciphertext,
+				String mac)
+		{
+			this.version = version;
+			this.available = available;
+			this.algorithm = algorithm;
+			this.nonce = nonce;
+			this.ciphertext = ciphertext;
+			this.mac = mac;
+		}
+
+		int getVersion()
+		{
+			return version;
+		}
+
+		boolean isAvailable()
+		{
+			return available;
+		}
+
+		String getAlgorithm()
+		{
+			return algorithm;
+		}
+
+		String getNonce()
+		{
+			return nonce;
+		}
+
+		String getCiphertext()
+		{
+			return ciphertext;
+		}
+
+		String getMac()
+		{
+			return mac;
+		}
+	}
 
 	static class FriendsChatRow
 	{

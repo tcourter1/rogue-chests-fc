@@ -4,56 +4,60 @@ Utilities to assist with managing the Rogue Chests Friends Chat.
 
 ## Features
 
-- Displays each Friends Chat member's Thieving level directly in the member list.
-- Highlights members below **84 Thieving**.
-- Under-84 side panel with customizable font, colors, and background.
-- One-click ignore list for trusted members.
-- Persistent banned player list with **BAN** indicator in the Friends Chat.
-- Automatically captures nearby non-FC players throughout the supported Rogue Chests tracking area.
-- Copy, clear, and promote captured players directly to the ban list.
-- Automatically sorts the Friends Chat with banned players first, followed by members below **84 Thieving**.
-- Tracks how long Friends Chat members remain within render distance throughout the supported tracking area.
-- Includes an overtime tracker with configurable time limits, notifications, and an overtime whitelist for excluding regular campers.
-- Detects unranked free-to-play FC members with configurable warnings and highlights.
-- Warns when nearby Friends Chat members are missing a configurable number of visible equipment slots, including support for two-handed weapons and an ignore list.
-- Adds an optional red loot-style beam to Party plugin tile pings for improved visibility.
+- Displays Friends Chat members' Thieving levels directly in the Friends Chat list.
+- Highlights members below 84 Thieving and provides an optional Under 84 overlay.
+- Identifies F2P members and provides configurable join notifications.
+- Tracks nearby non-FC players around the Rogue's Castle.
+- Provides overtime tracking and whitelist tools.
+- Includes equipment checks and nearby player/FC counters.
+- Syncs staff-managed Under 84 and banned-player lists.
+- Provides separate Staff and Thiever modes based on Rogue Chests Friends Chat access.
+- Includes a lightweight tool that flags potentially suspicious Friends Chat activity for staff review.
+
+## Access
+
+The plugin is intended for members of the **Rogue Chests** Friends Chat.
+
+**Thiever Mode** provides the general tools used by FC members while thieving.
+
+**Staff Mode** is automatically available to ranked Rogue Chests members and provides additional moderation and coordination tools.
+
+No password or separate plugin login is required.
 
 ## Staff and Thiever Modes
 
-The sidebar can operate in two different modes.
-
 ### Staff Mode
 
-Staff Mode provides access to the full set of moderation and Friends Chat tools and is protected by a one-time passcode.
+Staff Mode provides the full set of moderation and Friends Chat tools available to ranked staff.
 
-- Authorized users unlock Staff Mode once per RuneLite installation.
-- Authorization is stored locally and persists between sessions.
-- Staff-only functionality remains unavailable until the correct passcode has been entered.
-- Future passcode rotations can invalidate previous authorizations when required.
-- Includes Friends Chat moderation tools, player intelligence, equipment warnings, and Party controls.
+- Friends Chat moderation and player intelligence tools.
+- Equipment warnings and nearby player information.
+- Staff-managed list synchronization.
+- RuneLite Party controls and Party credential synchronization.
+- Suspicious Friends Chat activity tracking.
 
 ### Thiever Mode
 
-Thiever Mode does not require the staff passcode and provides a limited set of tools useful to regular thievers.
+Thiever Mode provides a limited set of tools useful to regular thievers.
 
 - **Nearby Outsiders** tracking.
 - **Overtime Tracking** and the **Overtime Whitelist**.
 - Party tile ping beams.
 - Party membership reminder with instructions to request the Party passphrase from a staff member.
 
-Staff moderation tools and automated access to the configured Party passphrase remain unavailable in Thiever Mode.
+Staff moderation tools and access to the internally configured Party passphrase remain unavailable in Thiever Mode.
 
 ## Party Plugin Integration
 
 ### Staff Mode
 
-Authorized Staff Mode users receive quick access to the configured RuneLite Party.
+Staff Mode users receive quick access to the configured RuneLite Party.
 
-- Prompts authorized users on login to join the Party.
+- Prompts staff on login to join the Party.
 - Joining the Party always requires a manual **Join** button press.
 - Users can select **Not now** to dismiss the login prompt.
 - **Join Party** and **Leave Party** controls are available from the plugin sidebar.
-- The Party passphrase is handled internally, so authorized users do not need to manually enter it.
+- The Party passphrase is handled internally, so staff do not need to manually enter it.
 
 ### Thiever Mode
 
@@ -72,7 +76,7 @@ Party tile pings can optionally display a tall red beam above the pinged tile, m
 - Automatically disappears with the ping.
 - Can be enabled or disabled from the plugin configuration.
 
-> **Important:** The plugin does **not** automatically join or leave a Party. All Party membership changes require explicit user interaction. Access to the internally configured Party passphrase remains restricted to authorized Staff Mode users.
+> **Important:** The plugin does **not** automatically join or leave a Party. All Party membership changes require explicit user interaction. Access to the internally configured Party passphrase remains restricted to Staff Mode users.
 
 ## Under-84 Panel
 
@@ -94,9 +98,7 @@ When first opening the sidebar, users can choose between **Staff Mode** and **Th
 
 ### Staff Mode Sidebar
 
-The full Staff sidebar provides:
-
-- Staff-only features.
+The full Staff sidebar provides access to moderation, player intelligence, Party coordination, synchronized staff data, and other staff tools.
 
 ### Thiever Mode Sidebar
 
@@ -104,4 +106,5 @@ The simplified Thiever sidebar provides:
 
 - **Nearby Outsiders** tracking and management.
 - **Overtime Whitelist** management.
-- No access to Staff moderation lists
+- Party ping support.
+- No access to Staff moderation lists or credentials.

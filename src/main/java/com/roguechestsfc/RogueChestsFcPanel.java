@@ -16,8 +16,6 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JPasswordField;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
@@ -55,6 +53,9 @@ public class RogueChestsFcPanel extends PluginPanel
             "nearbyOutsiders";
     private static final String OVERTIME_SECTION_KEY =
             "overtimeWhitelist";
+    private static final String RAT_WATCH_SECTION_KEY =
+            "ratWatch";
+    private static final int RAT_WATCH_LIST_HEIGHT = 145;
 
     private final RogueChestsFcPlugin plugin;
     private final ConfigManager configManager;
@@ -66,12 +67,9 @@ public class RogueChestsFcPanel extends PluginPanel
 
     private final JPanel contentContainer = new JPanel();
     private final JPanel partyControlsContainer = new JPanel();
-    private final JPasswordField passcodeField = new JPasswordField();
-    private final JLabel unlockStatusLabel = new JLabel();
 
     private final JLabel banSyncStatusLabel = new JLabel();
 
-    private final JTextArea ignoredNamesInput = new JTextArea();
     private final JTextArea bannedNamesInput = new JTextArea();
     private final JTextArea overtimeWhitelistInput = new JTextArea();
 
@@ -79,6 +77,7 @@ public class RogueChestsFcPanel extends PluginPanel
     private final JPanel bannedNamesList = new JPanel();
     private final JPanel capturedNearbyNamesList = new JPanel();
     private final JPanel overtimeWhitelistList = new JPanel();
+    private final JPanel ratWatchList = new JPanel();
 
     @Inject
     public RogueChestsFcPanel(
@@ -193,6 +192,13 @@ public class RogueChestsFcPanel extends PluginPanel
                 contentContainer.add(createPartyControlsSection());
                 contentContainer.add(
                         Box.createRigidArea(
+                                new Dimension(0, 8)
+                        )
+                );
+
+                contentContainer.add(createStaffSyncControls());
+                contentContainer.add(
+                        Box.createRigidArea(
                                 new Dimension(0, 14)
                         )
                 );
@@ -205,6 +211,13 @@ public class RogueChestsFcPanel extends PluginPanel
                 );
 
                 contentContainer.add(createBannedNamesSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+                contentContainer.add(createRatWatchSection());
                 contentContainer.add(
                         Box.createRigidArea(
                                 new Dimension(0, 14)
@@ -304,9 +317,10 @@ public class RogueChestsFcPanel extends PluginPanel
 
         JLabel description = new JLabel(
                 "<html><div style='text-align:center;'>"
-                        + "Staff Mode unlocks all features with a password.<br><br>"
+                        + "Staff Mode is available to Rogue Chests members "
+                        + "ranked Lieutenant or higher.<br><br>"
                         + "Thiever Mode provides Nearby Outsider and Overtime tools "
-                        + "without a passcode."
+                        + "for Rogue Chests members."
                         + "</div></html>",
                 SwingConstants.CENTER
         );
@@ -419,6 +433,7 @@ public class RogueChestsFcPanel extends PluginPanel
                         14.0f
                 )
         );
+
         title.setAlignmentX(Component.CENTER_ALIGNMENT);
         title.setHorizontalAlignment(SwingConstants.CENTER);
         title.setMaximumSize(
@@ -428,147 +443,64 @@ public class RogueChestsFcPanel extends PluginPanel
                 )
         );
 
-        JLabel line1 = new JLabel(
-                "Enter your passcode",
+        JLabel message = new JLabel(
+                "<html><div style='text-align:center;'>"
+                        + "You must be in the Rogue Chests Friends Chat "
+                        + "to use the plugin.<br><br>"
+                        + "Staff Mode requires Lieutenant rank or higher."
+                        + "</div></html>",
                 SwingConstants.CENTER
         );
 
-        line1.setForeground(
+        message.setForeground(
                 ColorScheme.LIGHT_GRAY_COLOR
         );
-        line1.setAlignmentX(
+
+        message.setAlignmentX(
                 Component.CENTER_ALIGNMENT
         );
-        line1.setHorizontalAlignment(
+
+        message.setHorizontalAlignment(
                 SwingConstants.CENTER
         );
-        line1.setMaximumSize(
+
+        message.setMaximumSize(
                 new Dimension(
                         Integer.MAX_VALUE,
-                        20
+                        Integer.MAX_VALUE
                 )
-        );
-
-        JLabel line2 = new JLabel(
-                "to unlock the plugin.",
-                SwingConstants.CENTER
-        );
-
-        line2.setForeground(
-                ColorScheme.LIGHT_GRAY_COLOR
-        );
-        line2.setAlignmentX(
-                Component.CENTER_ALIGNMENT
-        );
-        line2.setHorizontalAlignment(
-                SwingConstants.CENTER
-        );
-        line2.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        20
-                )
-        );
-
-        passcodeField.setAlignmentX(
-                Component.CENTER_ALIGNMENT
-        );
-        passcodeField.setHorizontalAlignment(
-                SwingConstants.CENTER
-        );
-        passcodeField.setPreferredSize(
-                new Dimension(0, BUTTON_HEIGHT)
-        );
-        passcodeField.setMinimumSize(
-                new Dimension(0, BUTTON_HEIGHT)
-        );
-        passcodeField.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        BUTTON_HEIGHT
-                )
-        );
-        passcodeField.setToolTipText(
-                "Enter plugin passcode"
-        );
-
-        JButton unlockButton = createButton(
-                "Unlock",
-                this::attemptUnlock
-        );
-
-        configureFullWidthButton(unlockButton);
-        unlockButton.setAlignmentX(
-                Component.CENTER_ALIGNMENT
-        );
-
-        unlockStatusLabel.setForeground(Color.RED);
-        unlockStatusLabel.setAlignmentX(
-                Component.CENTER_ALIGNMENT
-        );
-        unlockStatusLabel.setHorizontalAlignment(
-                SwingConstants.CENTER
-        );
-        unlockStatusLabel.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        22
-                )
-        );
-        unlockStatusLabel.setText(" ");
-
-        passcodeField.addActionListener(
-                ignored -> attemptUnlock()
         );
 
         panel.add(title);
         panel.add(Box.createRigidArea(new Dimension(0, 8)));
-        panel.add(line1);
-        panel.add(line2);
-        panel.add(Box.createRigidArea(new Dimension(0, 8)));
-        panel.add(passcodeField);
-        panel.add(Box.createRigidArea(new Dimension(0, 6)));
-        panel.add(unlockButton);
-        panel.add(Box.createRigidArea(new Dimension(0, 6)));
-        panel.add(unlockStatusLabel);
+        panel.add(message);
 
         return panel;
     }
 
-    private void attemptUnlock()
+    private JPanel createStaffSyncControls()
     {
-        char[] password = passcodeField.getPassword();
+        JPanel panel = createSectionPanel();
 
-        if (password == null || password.length == 0)
-        {
-            unlockStatusLabel.setText(
-                    "Enter a passcode."
-            );
-            return;
-        }
+        JButton syncButton = createButton(
+                "Sync Staff Lists",
+                plugin::syncBanListNow
+        );
 
-        String passcode = new String(password);
+        configureFullWidthButton(syncButton);
+        configureBanSyncStatusLabel();
 
-        try
-        {
-            if (mode != RogueChestsFcConfig.PluginMode.STAFF
-                    || !plugin.authorize(passcode))
-            {
-                unlockStatusLabel.setText(
-                        "Incorrect passcode."
-                );
-                passcodeField.selectAll();
-                return;
-            }
+        panel.add(syncButton);
+        panel.add(
+                Box.createRigidArea(
+                        new Dimension(0, 5)
+                )
+        );
+        panel.add(banSyncStatusLabel);
 
-            passcodeField.setText("");
-            unlockStatusLabel.setText(" ");
-            setAuthorized(true);
-        }
-        finally
-        {
-            java.util.Arrays.fill(password, '\0');
-        }
+        updateBanSyncStatus();
+
+        return panel;
     }
 
     private JPanel createPartyControlsSection()
@@ -807,16 +739,30 @@ public class RogueChestsFcPanel extends PluginPanel
 
     private JPanel createIgnoredNamesSection()
     {
-        configureInputArea(ignoredNamesInput);
         configureListPanel(ignoredNamesList);
 
-        JPanel content = createEditableListSection(
-                "Ignored players are excluded from the under-84 panel and join warnings.",
-                ignoredNamesInput,
-                ignoredNamesList,
-                this::addIgnoredNames,
+        JPanel content = createSectionPanel();
+
+        JLabel description = createSectionDescription(
+                "Ignored players are excluded from the under-84 panel and join warnings. Synced from the staff list."
+        );
+
+        JButton copyButton = createButton(
+                "Copy All",
                 plugin::copyIgnoredNames
         );
+
+        configureFullWidthButton(copyButton);
+
+        JScrollPane listScrollPane = createListScrollPane(
+                ignoredNamesList,
+                STANDARD_LIST_HEIGHT
+        );
+
+        content.add(description);
+        content.add(copyButton);
+        content.add(Box.createRigidArea(new Dimension(0, 7)));
+        content.add(listScrollPane);
 
         return createCollapsibleSection(
                 IGNORED_SECTION_KEY,
@@ -828,21 +774,19 @@ public class RogueChestsFcPanel extends PluginPanel
     private JPanel createBannedNamesSection()
     {
         configureInputArea(bannedNamesInput);
+        bannedNamesInput.setToolTipText(
+                "Enter a player name to search"
+        );
         configureListPanel(bannedNamesList);
 
         JPanel content = createSectionPanel();
 
         JLabel description = createSectionDescription(
-                "Banned players are marked red with BAN and do not receive Hiscore lookups."
+                "Banned players are marked red with BAN and do not receive Hiscore lookups. Synced from the staff list."
         );
 
         JScrollPane inputScrollPane =
                 createInputScrollPane(bannedNamesInput);
-
-        JButton addButton = createButton(
-                "Add Players",
-                this::addBannedNames
-        );
 
         JButton searchButton = createButton(
                 "Search",
@@ -854,28 +798,9 @@ public class RogueChestsFcPanel extends PluginPanel
                 plugin::copyBannedNames
         );
 
-        JButton clearAllButton = createButton(
-                "Clear All",
-                this::confirmClearBannedNames
-        );
-
-        JButton syncButton = createButton(
-                "Sync Now",
-                plugin::syncBanListNow
-        );
-
-        configureFullWidthButton(syncButton);
-
-        configureBanSyncStatusLabel();
-
-        JPanel firstActionRow = createButtonRow(
-                addButton,
-                searchButton
-        );
-
-        JPanel secondActionRow = createButtonRow(
-                copyButton,
-                clearAllButton
+        JPanel actionRow = createButtonRow(
+                searchButton,
+                copyButton
         );
 
         JScrollPane listScrollPane = createListScrollPane(
@@ -886,17 +811,9 @@ public class RogueChestsFcPanel extends PluginPanel
         content.add(description);
         content.add(inputScrollPane);
         content.add(Box.createRigidArea(new Dimension(0, 5)));
-        content.add(firstActionRow);
-        content.add(Box.createRigidArea(new Dimension(0, 5)));
-        content.add(secondActionRow);
-        content.add(Box.createRigidArea(new Dimension(0, 7)));
-        content.add(syncButton);
-        content.add(Box.createRigidArea(new Dimension(0, 5)));
-        content.add(banSyncStatusLabel);
+        content.add(actionRow);
         content.add(Box.createRigidArea(new Dimension(0, 7)));
         content.add(listScrollPane);
-
-        updateBanSyncStatus();
 
         return createCollapsibleSection(
                 BANNED_SECTION_KEY,
@@ -929,7 +846,7 @@ public class RogueChestsFcPanel extends PluginPanel
                     ColorScheme.BRAND_ORANGE
             );
             banSyncStatusLabel.setText(
-                    "Syncing ban list..."
+                    "Syncing staff lists..."
             );
             return;
         }
@@ -987,6 +904,31 @@ public class RogueChestsFcPanel extends PluginPanel
         }
     }
 
+    private JPanel createRatWatchSection()
+    {
+        configureListPanel(ratWatchList);
+
+        JPanel content = createSectionPanel();
+
+        JLabel description = createSectionDescription(
+                "Unranked FC members with suspicious activity observed during the current 7-day Rat Watch window."
+        );
+
+        JScrollPane listScrollPane = createListScrollPane(
+                ratWatchList,
+                RAT_WATCH_LIST_HEIGHT
+        );
+
+        content.add(description);
+        content.add(listScrollPane);
+
+        return createCollapsibleSection(
+                RAT_WATCH_SECTION_KEY,
+                "Rat Watch",
+                content
+        );
+    }
+
     private JPanel createCapturedNearbyNamesSection()
     {
         configureListPanel(capturedNearbyNamesList);
@@ -1017,19 +959,10 @@ public class RogueChestsFcPanel extends PluginPanel
                 clearButton
         );
 
-        JButton addToBanButton = createButton(
-                "Add All to Ban List",
-                plugin::addCapturedNearbyNamesToBanList
-        );
-
-        configureFullWidthButton(addToBanButton);
-
         content.add(description);
         content.add(listScrollPane);
         content.add(Box.createRigidArea(new Dimension(0, 5)));
         content.add(actionRow);
-        content.add(Box.createRigidArea(new Dimension(0, 5)));
-        content.add(addToBanButton);
 
         return createCollapsibleSection(
                 CAPTURED_SECTION_KEY,
@@ -1501,35 +1434,6 @@ public class RogueChestsFcPanel extends PluginPanel
         );
     }
 
-    private void addIgnoredNames()
-    {
-        String input = ignoredNamesInput.getText();
-
-        if (input == null || input.trim().isEmpty())
-        {
-            return;
-        }
-
-        plugin.addIgnoredNames(input);
-        ignoredNamesInput.setText("");
-        refresh();
-    }
-
-    private void addBannedNames()
-    {
-        String input = bannedNamesInput.getText();
-
-        if (input == null || input.trim().isEmpty())
-        {
-            return;
-        }
-
-        plugin.addBannedNames(input);
-        bannedNamesInput.setText("");
-        bannedSearchQuery = "";
-        refresh();
-    }
-
     private void searchBannedNames()
     {
         String input = bannedNamesInput.getText();
@@ -1540,31 +1444,6 @@ public class RogueChestsFcPanel extends PluginPanel
                         : input.trim();
 
         refreshBannedList();
-    }
-
-    private void confirmClearBannedNames()
-    {
-        if (plugin.getBannedPlayerNames().isEmpty())
-        {
-            return;
-        }
-
-        int result = JOptionPane.showConfirmDialog(
-                this,
-                "Are you sure you want to clear the entire banned players list?",
-                "Clear Banned Players",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE
-        );
-
-        if (result != JOptionPane.YES_OPTION)
-        {
-            return;
-        }
-
-        bannedSearchQuery = "";
-        bannedNamesInput.setText("");
-        plugin.clearBannedNames();
     }
 
     private void addOvertimeWhitelistNames()
@@ -1606,10 +1485,11 @@ public class RogueChestsFcPanel extends PluginPanel
             rebuildList(
                     ignoredNamesList,
                     plugin.getIgnoredPlayerNames(),
-                    plugin::removeIgnoredName
+                    null
             );
 
             refreshBannedList();
+            refreshRatWatchList();
             updateBanSyncStatus();
         }
 
@@ -1627,6 +1507,188 @@ public class RogueChestsFcPanel extends PluginPanel
 
         revalidate();
         repaint();
+    }
+
+    private void refreshRatWatchList()
+    {
+        ratWatchList.removeAll();
+
+        List<RogueChestsFcRatWatch.RatWatchEntry> entries =
+                plugin.getRatWatchEntries();
+
+        if (entries.isEmpty())
+        {
+            JLabel emptyLabel = new JLabel(
+                    "No suspicious players",
+                    SwingConstants.CENTER
+            );
+
+            emptyLabel.setForeground(
+                    ColorScheme.LIGHT_GRAY_COLOR
+            );
+            emptyLabel.setBorder(
+                    new EmptyBorder(8, 0, 8, 0)
+            );
+            emptyLabel.setAlignmentX(
+                    Component.CENTER_ALIGNMENT
+            );
+            emptyLabel.setMaximumSize(
+                    new Dimension(
+                            Integer.MAX_VALUE,
+                            34
+                    )
+            );
+            emptyLabel.setHorizontalAlignment(
+                    SwingConstants.CENTER
+            );
+
+            ratWatchList.add(emptyLabel);
+        }
+        else
+        {
+            for (RogueChestsFcRatWatch.RatWatchEntry entry : entries)
+            {
+                ratWatchList.add(
+                        createRatWatchRow(entry)
+                );
+
+                ratWatchList.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 3)
+                        )
+                );
+            }
+        }
+
+        ratWatchList.revalidate();
+        ratWatchList.repaint();
+    }
+
+    private JPanel createRatWatchRow(
+            RogueChestsFcRatWatch.RatWatchEntry entry)
+    {
+        JPanel row = new JPanel(
+                new BorderLayout(5, 0)
+        );
+
+        row.setBackground(
+                ColorScheme.MEDIUM_GRAY_COLOR
+        );
+        row.setBorder(
+                new EmptyBorder(3, 6, 3, 3)
+        );
+        row.setPreferredSize(
+                new Dimension(0, PLAYER_ROW_HEIGHT)
+        );
+        row.setMinimumSize(
+                new Dimension(0, PLAYER_ROW_HEIGHT)
+        );
+        row.setMaximumSize(
+                new Dimension(
+                        Integer.MAX_VALUE,
+                        PLAYER_ROW_HEIGHT
+                )
+        );
+        row.setAlignmentX(
+                Component.LEFT_ALIGNMENT
+        );
+
+        Color scoreColor =
+                getRatWatchScoreColor(
+                        entry.getScore()
+                );
+
+        JLabel nameLabel =
+                new JLabel(entry.getName());
+
+        nameLabel.setForeground(scoreColor);
+
+        JLabel scoreLabel =
+                new JLabel(
+                        entry.getScore() + "/100"
+                );
+
+        scoreLabel.setForeground(scoreColor);
+        scoreLabel.setHorizontalAlignment(
+                SwingConstants.RIGHT
+        );
+
+        JButton removeButton =
+                new JButton("\u2715");
+
+        removeButton.setFocusable(false);
+        removeButton.setToolTipText(
+                "Dismiss " + entry.getName()
+        );
+        removeButton.setPreferredSize(
+                new Dimension(30, 24)
+        );
+        removeButton.setMargin(
+                new Insets(1, 5, 1, 5)
+        );
+
+        removeButton.addActionListener(ignored ->
+        {
+            plugin.dismissRatWatchPlayer(
+                    entry.getName()
+            );
+            refresh();
+        });
+
+        JPanel rightPanel =
+                new JPanel(
+                        new BorderLayout(5, 0)
+                );
+
+        rightPanel.setOpaque(false);
+        rightPanel.add(
+                scoreLabel,
+                BorderLayout.CENTER
+        );
+        rightPanel.add(
+                removeButton,
+                BorderLayout.EAST
+        );
+
+        row.add(
+                nameLabel,
+                BorderLayout.CENTER
+        );
+        row.add(
+                rightPanel,
+                BorderLayout.EAST
+        );
+
+        return row;
+    }
+
+    private Color getRatWatchScoreColor(
+            int score)
+    {
+        if (score >= 75)
+        {
+            return Color.RED;
+        }
+
+        if (score >= 50)
+        {
+            return new Color(
+                    255,
+                    140,
+                    0
+            );
+        }
+
+        if (score >= 25)
+        {
+            return Color.YELLOW;
+        }
+
+        return new Color(
+                0,
+                200,
+                0
+        );
     }
 
     private void refreshBannedList()
@@ -1658,7 +1720,7 @@ public class RogueChestsFcPanel extends PluginPanel
         rebuildList(
                 bannedNamesList,
                 bannedNames,
-                plugin::removeBannedName
+                null
         );
     }
 
@@ -1756,27 +1818,31 @@ public class RogueChestsFcPanel extends PluginPanel
                 ColorScheme.LIGHT_GRAY_COLOR
         );
 
-        JButton removeButton = new JButton("\u2715");
-
-        removeButton.setFocusable(false);
-        removeButton.setToolTipText(
-                "Remove " + playerName
-        );
-        removeButton.setPreferredSize(
-                new Dimension(30, 24)
-        );
-        removeButton.setMargin(
-                new java.awt.Insets(1, 5, 1, 5)
-        );
-
-        removeButton.addActionListener(ignored ->
-        {
-            removalAction.remove(playerName);
-            refresh();
-        });
-
         row.add(nameLabel, BorderLayout.CENTER);
-        row.add(removeButton, BorderLayout.EAST);
+
+        if (removalAction != null)
+        {
+            JButton removeButton = new JButton("\u2715");
+
+            removeButton.setFocusable(false);
+            removeButton.setToolTipText(
+                    "Remove " + playerName
+            );
+            removeButton.setPreferredSize(
+                    new Dimension(30, 24)
+            );
+            removeButton.setMargin(
+                    new java.awt.Insets(1, 5, 1, 5)
+            );
+
+            removeButton.addActionListener(ignored ->
+            {
+                removalAction.remove(playerName);
+                refresh();
+            });
+
+            row.add(removeButton, BorderLayout.EAST);
+        }
 
         return row;
     }
