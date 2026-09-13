@@ -331,6 +331,7 @@ public class RogueChestsFcPlugin extends Plugin
 	private volatile boolean modeSwitchInProgress;
 	private boolean partyJoinBannerVisible;
 	private boolean partyReminderDismissedForLogin;
+	private boolean clearCapturedNearbyOnNextLogin;
 
 	private final AtomicBoolean banListSyncInProgress =
 			new AtomicBoolean(false);
@@ -699,6 +700,9 @@ public class RogueChestsFcPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
+		clearCapturedNearbyOnNextLogin =
+				client.getGameState() != GameState.LOGGED_IN;
+
 		refreshConfiguredNameCaches();
 
 		BufferedImage icon =
@@ -1164,29 +1168,47 @@ public class RogueChestsFcPlugin extends Plugin
 	public void onGameStateChanged(
 			GameStateChanged event)
 	{
+		GameState gameState = event.getGameState();
+
+		// A normal logout should not immediately clear Nearby Outsiders.
+		// Instead, remember that the next real login should clear it.
+		// Death/respawn can transition back to LOGGED_IN without ever
+		// reaching LOGIN_SCREEN, so it will not trip this flag.
+		if (gameState == GameState.LOGIN_SCREEN)
+		{
+			clearCapturedNearbyOnNextLogin = true;
+			partyReminderDismissedForLogin = false;
+		}
+
+		// World hops should clear immediately.
+		if (gameState == GameState.HOPPING)
+		{
+			clearCapturedNearbyNames();
+			clearCapturedNearbyOnNextLogin = false;
+		}
+
+		if (gameState == GameState.LOGGED_IN)
+		{
+			if (clearCapturedNearbyOnNextLogin)
+			{
+				clearCapturedNearbyNames();
+				clearCapturedNearbyOnNextLogin = false;
+			}
+
+			if (authorizedFeaturesActive)
+			{
+				updatePartyJoinBannerForLogin();
+			}
+
+			return;
+		}
+
 		if (!authorizedFeaturesActive)
 		{
 			return;
 		}
 
-		if (event.getGameState() == GameState.HOPPING)
-		{
-			clearCapturedNearbyNames();
-		}
-
-		if (event.getGameState() == GameState.LOGGED_IN)
-		{
-			clearCapturedNearbyNames();
-			updatePartyJoinBannerForLogin();
-			return;
-		}
-
 		partyJoinBannerVisible = false;
-
-		if (event.getGameState() == GameState.LOGIN_SCREEN)
-		{
-			partyReminderDismissedForLogin = false;
-		}
 
 		panel.refresh();
 
