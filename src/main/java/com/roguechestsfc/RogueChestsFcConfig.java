@@ -240,7 +240,7 @@ public interface RogueChestsFcConfig extends Config
     }
 
     @Range(
-            min = 1,
+            min = 0,
             max = 300
     )
     @ConfigItem(
@@ -414,38 +414,6 @@ public interface RogueChestsFcConfig extends Config
         return PluginMode.NONE;
     }
 
-    @ConfigItem(
-            keyName = "pluginAuthorized",
-            name = "",
-            description = "",
-            hidden = true
-    )
-    default boolean pluginAuthorized()
-    {
-        return false;
-    }
-
-    @ConfigItem(
-            keyName = "pluginAuthorizationVersion",
-            name = "",
-            description = "",
-            hidden = true
-    )
-    default String pluginAuthorizationVersion()
-    {
-        return "";
-    }
-
-    @ConfigItem(
-            keyName = "pluginAuthorizationHash",
-            name = "",
-            description = "",
-            hidden = true
-    )
-    default String pluginAuthorizationHash()
-    {
-        return "";
-    }
 
     enum PluginMode
     {

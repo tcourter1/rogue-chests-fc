@@ -51,7 +51,7 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
         }
 
         activePings.removeIf(
-                ping -> ping.getWorldPoint().equals(worldPoint)
+                ping -> ping.worldPoint.equals(worldPoint)
         );
 
         activePings.add(
@@ -78,14 +78,14 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
         long now = System.currentTimeMillis();
 
         activePings.removeIf(
-                ping -> now - ping.getCreatedAtMillis()
+                ping -> now - ping.createdAtMillis
                         >= PING_LIFETIME_MILLIS
         );
 
         for (PartyPingBeam ping : activePings)
         {
             long elapsed =
-                    now - ping.getCreatedAtMillis();
+                    now - ping.createdAtMillis;
 
             renderPing(
                     graphics,
@@ -102,7 +102,7 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
             PartyPingBeam ping,
             long elapsedMillis)
     {
-        WorldPoint worldPoint = ping.getWorldPoint();
+        WorldPoint worldPoint = ping.worldPoint;
 
         if (worldPoint.getPlane() != client.getPlane())
         {
@@ -262,14 +262,5 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
             this.createdAtMillis = createdAtMillis;
         }
 
-        WorldPoint getWorldPoint()
-        {
-            return worldPoint;
-        }
-
-        long getCreatedAtMillis()
-        {
-            return createdAtMillis;
-        }
     }
 }

@@ -236,32 +236,6 @@ final class RogueChestsFcRatWatch
         return entries;
     }
 
-    synchronized List<EvidenceRecord> getEvidence(
-            String playerName,
-            Instant now)
-    {
-        String normalizedName = normalizeName(playerName);
-        if (normalizedName.isEmpty())
-        {
-            return Collections.emptyList();
-        }
-
-        if (now == null)
-        {
-            now = Instant.now();
-        }
-
-        purgeExpired(now);
-
-        PlayerHistory history = histories.get(normalizedName);
-        if (history == null)
-        {
-            return Collections.emptyList();
-        }
-
-        return new ArrayList<>(history.evidence);
-    }
-
     synchronized void dismiss(String playerName, Instant now)
     {
         String normalizedName = normalizeName(playerName);
@@ -640,25 +614,6 @@ final class RogueChestsFcRatWatch
             this.details = details;
         }
 
-        EvidenceType getType()
-        {
-            return type;
-        }
-
-        Instant getOccurredAt()
-        {
-            return occurredAt;
-        }
-
-        int getPoints()
-        {
-            return points;
-        }
-
-        String getDetails()
-        {
-            return details;
-        }
     }
 
     static final class RatWatchEntry

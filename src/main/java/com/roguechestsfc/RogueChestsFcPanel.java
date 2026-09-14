@@ -112,25 +112,6 @@ public class RogueChestsFcPanel extends PluginPanel
         rebuildPanelContents();
     }
 
-    void setAuthorized(boolean authorized)
-    {
-        if (!SwingUtilities.isEventDispatchThread())
-        {
-            SwingUtilities.invokeLater(
-                    () -> setAuthorized(authorized)
-            );
-            return;
-        }
-
-        if (this.authorized == authorized)
-        {
-            return;
-        }
-
-        this.authorized = authorized;
-        rebuildPanelContents();
-    }
-
     void setModeState(
             RogueChestsFcConfig.PluginMode mode,
             boolean authorized)
@@ -1354,23 +1335,6 @@ public class RogueChestsFcPanel extends PluginPanel
         );
 
         return button;
-    }
-
-    private void configureModeButton(
-            JButton button)
-    {
-        button.setAlignmentX(
-                Component.CENTER_ALIGNMENT
-        );
-        button.setPreferredSize(
-                new Dimension(180, BUTTON_HEIGHT)
-        );
-        button.setMinimumSize(
-                new Dimension(180, BUTTON_HEIGHT)
-        );
-        button.setMaximumSize(
-                new Dimension(180, BUTTON_HEIGHT)
-        );
     }
 
     private void configurePromptButton(
