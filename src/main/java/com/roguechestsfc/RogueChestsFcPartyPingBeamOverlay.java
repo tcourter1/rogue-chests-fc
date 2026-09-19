@@ -104,7 +104,7 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
     {
         WorldPoint worldPoint = ping.worldPoint;
 
-        if (worldPoint.getPlane() != client.getPlane())
+        if (worldPoint.getPlane() != client.getTopLevelWorldView().getPlane())
         {
             return;
         }
@@ -177,27 +177,18 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
             Polygon beam =
                     createBeamPolygon(
                             anchorX,
-                            anchorY,
-                            BEAM_HEIGHT,
-                            BEAM_BOTTOM_WIDTH,
-                            BEAM_TOP_WIDTH
+                            anchorY
                     );
 
             beamGraphics.setColor(
-                    withAlpha(
-                            BEAM_COLOR,
-                            beamAlpha
-                    )
+                    withAlpha(beamAlpha)
             );
             beamGraphics.fillPolygon(beam);
 
             OverlayUtil.renderPolygon(
                     beamGraphics,
                     tilePolygon,
-                    withAlpha(
-                            BEAM_COLOR,
-                            tileAlpha
-                    )
+                    withAlpha(tileAlpha)
             );
         }
         finally
@@ -208,15 +199,12 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
 
     private Polygon createBeamPolygon(
             int anchorX,
-            int anchorY,
-            int height,
-            int bottomWidth,
-            int topWidth)
+            int anchorY)
     {
-        int bottomHalf = bottomWidth / 2;
-        int topHalf = topWidth / 2;
+        int bottomHalf = BEAM_BOTTOM_WIDTH / 2;
+        int topHalf = BEAM_TOP_WIDTH / 2;
 
-        int topY = anchorY - height;
+        int topY = anchorY - BEAM_HEIGHT;
 
         return new Polygon(
                 new int[]
@@ -237,14 +225,12 @@ public class RogueChestsFcPartyPingBeamOverlay extends Overlay
         );
     }
 
-    private Color withAlpha(
-            Color color,
-            int alpha)
+    private Color withAlpha(int alpha)
     {
         return new Color(
-                color.getRed(),
-                color.getGreen(),
-                color.getBlue(),
+                BEAM_COLOR.getRed(),
+                BEAM_COLOR.getGreen(),
+                BEAM_COLOR.getBlue(),
                 alpha
         );
     }

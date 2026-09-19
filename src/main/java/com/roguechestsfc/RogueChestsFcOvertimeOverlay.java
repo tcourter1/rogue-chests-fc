@@ -41,6 +41,8 @@ public class RogueChestsFcOvertimeOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
+        panelComponent.getChildren().clear();
+
         if (!config.showOvertimePanel())
         {
             return null;

@@ -1,8 +1,18 @@
 package com.roguechestsfc;
 
-import java.awt.*;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.Graphics;
+import java.awt.GridLayout;
+import java.awt.Insets;
+import java.awt.Rectangle;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -14,6 +24,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.ImageIcon;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -27,6 +38,9 @@ import javax.swing.plaf.basic.BasicScrollBarUI;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.ImageUtil;
+import net.runelite.client.util.LinkBrowser;
+import net.runelite.client.util.SwingUtil;
 
 public class RogueChestsFcPanel extends PluginPanel
 {
@@ -36,6 +50,11 @@ public class RogueChestsFcPanel extends PluginPanel
     private static final int PLAYER_ROW_HEIGHT = 30;
     private static final int BUTTON_HEIGHT = 30;
     private static final int SCROLLBAR_SIZE = 7;
+    private static final int HEADER_ICON_SIZE = 18;
+    private static final String OVERTIME_WHITELIST_DESCRIPTION =
+            "Whitelisted players are excluded from overtime tracking, the overtime panel, and overtime notifications.";
+    private static final String DISCORD_URL =
+            "https://discord.gg/sZarSKGQTv";
     private static final DateTimeFormatter SYNC_TIME_FORMAT =
             DateTimeFormatter.ofPattern("h:mm a")
                     .withZone(ZoneId.systemDefault());
@@ -53,9 +72,6 @@ public class RogueChestsFcPanel extends PluginPanel
             "nearbyOutsiders";
     private static final String OVERTIME_SECTION_KEY =
             "overtimeWhitelist";
-    private static final String RAT_WATCH_SECTION_KEY =
-            "ratWatch";
-    private static final int RAT_WATCH_LIST_HEIGHT = 145;
 
     private final RogueChestsFcPlugin plugin;
     private final ConfigManager configManager;
@@ -77,7 +93,11 @@ public class RogueChestsFcPanel extends PluginPanel
     private final JPanel bannedNamesList = new JPanel();
     private final JPanel capturedNearbyNamesList = new JPanel();
     private final JPanel overtimeWhitelistList = new JPanel();
-    private final JPanel ratWatchList = new JPanel();
+
+    private List<String> renderedIgnoredNames;
+    private List<String> renderedBannedNames;
+    private List<String> renderedCapturedNearbyNames;
+    private List<String> renderedOvertimeWhitelistNames;
 
     @Inject
     public RogueChestsFcPanel(
@@ -184,21 +204,7 @@ public class RogueChestsFcPanel extends PluginPanel
                         )
                 );
 
-                contentContainer.add(createIgnoredNamesSection());
-                contentContainer.add(
-                        Box.createRigidArea(
-                                new Dimension(0, 14)
-                        )
-                );
-
                 contentContainer.add(createBannedNamesSection());
-                contentContainer.add(
-                        Box.createRigidArea(
-                                new Dimension(0, 14)
-                        )
-                );
-
-                contentContainer.add(createRatWatchSection());
                 contentContainer.add(
                         Box.createRigidArea(
                                 new Dimension(0, 14)
@@ -213,6 +219,14 @@ public class RogueChestsFcPanel extends PluginPanel
                 );
 
                 contentContainer.add(createOvertimeWhitelistSection());
+                contentContainer.add(
+                        Box.createRigidArea(
+                                new Dimension(0, 14)
+                        )
+                );
+
+
+                contentContainer.add(createIgnoredNamesSection());
                 contentContainer.add(
                         Box.createRigidArea(
                                 new Dimension(0, 10)
@@ -713,9 +727,54 @@ public class RogueChestsFcPanel extends PluginPanel
         );
         title.setHorizontalAlignment(SwingConstants.CENTER);
 
+        JButton discordButton = createDiscordButton();
+        int buttonWidth = discordButton.getPreferredSize().width;
+
+        panel.add(
+                Box.createHorizontalStrut(buttonWidth),
+                BorderLayout.WEST
+        );
         panel.add(title, BorderLayout.CENTER);
+        panel.add(discordButton, BorderLayout.EAST);
 
         return panel;
+    }
+
+    private JButton createDiscordButton()
+    {
+        BufferedImage discordImage =
+                ImageUtil.loadImageResource(
+                        getClass(),
+                        "Discord.png"
+                );
+
+        JButton button = new JButton();
+
+        if (discordImage != null)
+        {
+            button.setIcon(
+                    new ImageIcon(
+                            ImageUtil.resizeImage(
+                                    discordImage,
+                                    HEADER_ICON_SIZE,
+                                    HEADER_ICON_SIZE
+                            )
+                    )
+            );
+        }
+        else
+        {
+            button.setText("Discord");
+        }
+
+        SwingUtil.removeButtonDecorations(button);
+        button.setToolTipText("Join the Rogue Chests Discord");
+        button.setFocusable(false);
+        button.addActionListener(
+                event -> LinkBrowser.browse(DISCORD_URL)
+        );
+
+        return button;
     }
 
     private JPanel createIgnoredNamesSection()
@@ -885,31 +944,6 @@ public class RogueChestsFcPanel extends PluginPanel
         }
     }
 
-    private JPanel createRatWatchSection()
-    {
-        configureListPanel(ratWatchList);
-
-        JPanel content = createSectionPanel();
-
-        JLabel description = createSectionDescription(
-                "Unranked FC members with suspicious activity observed during the current 7-day Rat Watch window."
-        );
-
-        JScrollPane listScrollPane = createListScrollPane(
-                ratWatchList,
-                RAT_WATCH_LIST_HEIGHT
-        );
-
-        content.add(description);
-        content.add(listScrollPane);
-
-        return createCollapsibleSection(
-                RAT_WATCH_SECTION_KEY,
-                "Rat Watch",
-                content
-        );
-    }
-
     private JPanel createCapturedNearbyNamesSection()
     {
         configureListPanel(capturedNearbyNamesList);
@@ -958,7 +992,6 @@ public class RogueChestsFcPanel extends PluginPanel
         configureListPanel(overtimeWhitelistList);
 
         JPanel content = createEditableListSection(
-                "Whitelisted players are excluded from overtime tracking, the overtime panel, and overtime notifications.",
                 overtimeWhitelistInput,
                 overtimeWhitelistList,
                 this::addOvertimeWhitelistNames,
@@ -973,7 +1006,6 @@ public class RogueChestsFcPanel extends PluginPanel
     }
 
     private JPanel createEditableListSection(
-            String descriptionText,
             JTextArea input,
             JPanel listPanel,
             Runnable addAction,
@@ -982,7 +1014,7 @@ public class RogueChestsFcPanel extends PluginPanel
         JPanel section = createSectionPanel();
 
         JLabel description = createSectionDescription(
-                descriptionText
+                OVERTIME_WHITELIST_DESCRIPTION
         );
 
         JScrollPane inputScrollPane =
@@ -1104,7 +1136,6 @@ public class RogueChestsFcPanel extends PluginPanel
             public void mouseClicked(MouseEvent ignored)
             {
                 boolean expanded = content.isVisible();
-                boolean collapsedNow = expanded;
 
                 content.setVisible(!expanded);
                 spacer.setVisible(!expanded);
@@ -1112,7 +1143,7 @@ public class RogueChestsFcPanel extends PluginPanel
 
                 saveSectionCollapsed(
                         sectionKey,
-                        collapsedNow
+                        expanded
                 );
 
                 container.revalidate();
@@ -1446,213 +1477,48 @@ public class RogueChestsFcPanel extends PluginPanel
 
             refreshPartyControls();
 
-            rebuildList(
-                    ignoredNamesList,
-                    plugin.getIgnoredPlayerNames(),
-                    null
-            );
+            List<String> ignoredNames = plugin.getIgnoredPlayerNames();
+            if (!ignoredNames.equals(renderedIgnoredNames))
+            {
+                rebuildList(
+                        ignoredNamesList,
+                        ignoredNames,
+                        null
+                );
+                renderedIgnoredNames = List.copyOf(ignoredNames);
+            }
 
             refreshBannedList();
-            refreshRatWatchList();
             updateBanSyncStatus();
         }
 
-        rebuildList(
-                capturedNearbyNamesList,
-                plugin.getCapturedNearbyPlayerNames(),
-                plugin::removeCapturedNearbyName
-        );
+        List<String> capturedNearbyNames =
+                plugin.getCapturedNearbyPlayerNames();
+        if (!capturedNearbyNames.equals(renderedCapturedNearbyNames))
+        {
+            rebuildList(
+                    capturedNearbyNamesList,
+                    capturedNearbyNames,
+                    plugin::removeCapturedNearbyName
+            );
+            renderedCapturedNearbyNames = List.copyOf(capturedNearbyNames);
+        }
 
-        rebuildList(
-                overtimeWhitelistList,
-                plugin.getOvertimeWhitelistPlayerNames(),
-                plugin::removeOvertimeWhitelistName
-        );
+        List<String> overtimeWhitelistNames =
+                plugin.getOvertimeWhitelistPlayerNames();
+        if (!overtimeWhitelistNames.equals(renderedOvertimeWhitelistNames))
+        {
+            rebuildList(
+                    overtimeWhitelistList,
+                    overtimeWhitelistNames,
+                    plugin::removeOvertimeWhitelistName
+            );
+            renderedOvertimeWhitelistNames =
+                    List.copyOf(overtimeWhitelistNames);
+        }
 
         revalidate();
         repaint();
-    }
-
-    private void refreshRatWatchList()
-    {
-        ratWatchList.removeAll();
-
-        List<RogueChestsFcRatWatch.RatWatchEntry> entries =
-                plugin.getRatWatchEntries();
-
-        if (entries.isEmpty())
-        {
-            JLabel emptyLabel = new JLabel(
-                    "No suspicious players",
-                    SwingConstants.CENTER
-            );
-
-            emptyLabel.setForeground(
-                    ColorScheme.LIGHT_GRAY_COLOR
-            );
-            emptyLabel.setBorder(
-                    new EmptyBorder(8, 0, 8, 0)
-            );
-            emptyLabel.setAlignmentX(
-                    Component.CENTER_ALIGNMENT
-            );
-            emptyLabel.setMaximumSize(
-                    new Dimension(
-                            Integer.MAX_VALUE,
-                            34
-                    )
-            );
-            emptyLabel.setHorizontalAlignment(
-                    SwingConstants.CENTER
-            );
-
-            ratWatchList.add(emptyLabel);
-        }
-        else
-        {
-            for (RogueChestsFcRatWatch.RatWatchEntry entry : entries)
-            {
-                ratWatchList.add(
-                        createRatWatchRow(entry)
-                );
-
-                ratWatchList.add(
-                        Box.createRigidArea(
-                                new Dimension(0, 3)
-                        )
-                );
-            }
-        }
-
-        ratWatchList.revalidate();
-        ratWatchList.repaint();
-    }
-
-    private JPanel createRatWatchRow(
-            RogueChestsFcRatWatch.RatWatchEntry entry)
-    {
-        JPanel row = new JPanel(
-                new BorderLayout(5, 0)
-        );
-
-        row.setBackground(
-                ColorScheme.MEDIUM_GRAY_COLOR
-        );
-        row.setBorder(
-                new EmptyBorder(3, 6, 3, 3)
-        );
-        row.setPreferredSize(
-                new Dimension(0, PLAYER_ROW_HEIGHT)
-        );
-        row.setMinimumSize(
-                new Dimension(0, PLAYER_ROW_HEIGHT)
-        );
-        row.setMaximumSize(
-                new Dimension(
-                        Integer.MAX_VALUE,
-                        PLAYER_ROW_HEIGHT
-                )
-        );
-        row.setAlignmentX(
-                Component.LEFT_ALIGNMENT
-        );
-
-        Color scoreColor =
-                getRatWatchScoreColor(
-                        entry.getScore()
-                );
-
-        JLabel nameLabel =
-                new JLabel(entry.getName());
-
-        nameLabel.setForeground(scoreColor);
-
-        JLabel scoreLabel =
-                new JLabel(
-                        entry.getScore() + "/100"
-                );
-
-        scoreLabel.setForeground(scoreColor);
-        scoreLabel.setHorizontalAlignment(
-                SwingConstants.RIGHT
-        );
-
-        JButton removeButton =
-                new JButton("\u2715");
-
-        removeButton.setFocusable(false);
-        removeButton.setToolTipText(
-                "Dismiss " + entry.getName()
-        );
-        removeButton.setPreferredSize(
-                new Dimension(30, 24)
-        );
-        removeButton.setMargin(
-                new Insets(1, 5, 1, 5)
-        );
-
-        removeButton.addActionListener(ignored ->
-        {
-            plugin.dismissRatWatchPlayer(
-                    entry.getName()
-            );
-            refresh();
-        });
-
-        JPanel rightPanel =
-                new JPanel(
-                        new BorderLayout(5, 0)
-                );
-
-        rightPanel.setOpaque(false);
-        rightPanel.add(
-                scoreLabel,
-                BorderLayout.CENTER
-        );
-        rightPanel.add(
-                removeButton,
-                BorderLayout.EAST
-        );
-
-        row.add(
-                nameLabel,
-                BorderLayout.CENTER
-        );
-        row.add(
-                rightPanel,
-                BorderLayout.EAST
-        );
-
-        return row;
-    }
-
-    private Color getRatWatchScoreColor(
-            int score)
-    {
-        if (score >= 75)
-        {
-            return Color.RED;
-        }
-
-        if (score >= 50)
-        {
-            return new Color(
-                    255,
-                    140,
-                    0
-            );
-        }
-
-        if (score >= 25)
-        {
-            return Color.YELLOW;
-        }
-
-        return new Color(
-                0,
-                200,
-                0
-        );
     }
 
     private void refreshBannedList()
@@ -1681,11 +1547,15 @@ public class RogueChestsFcPanel extends PluginPanel
             bannedNames = filteredNames;
         }
 
-        rebuildList(
-                bannedNamesList,
-                bannedNames,
-                null
-        );
+        if (!bannedNames.equals(renderedBannedNames))
+        {
+            rebuildList(
+                    bannedNamesList,
+                    bannedNames,
+                    null
+            );
+            renderedBannedNames = List.copyOf(bannedNames);
+        }
     }
 
     private void rebuildList(
@@ -1786,7 +1656,7 @@ public class RogueChestsFcPanel extends PluginPanel
 
         if (removalAction != null)
         {
-            JButton removeButton = new JButton("\u2715");
+            JButton removeButton = new JButton("✕");
 
             removeButton.setFocusable(false);
             removeButton.setToolTipText(
@@ -1796,7 +1666,7 @@ public class RogueChestsFcPanel extends PluginPanel
                     new Dimension(30, 24)
             );
             removeButton.setMargin(
-                    new java.awt.Insets(1, 5, 1, 5)
+                    new Insets(1, 5, 1, 5)
             );
 
             removeButton.addActionListener(ignored ->

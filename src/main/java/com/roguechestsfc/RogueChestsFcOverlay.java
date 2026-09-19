@@ -40,6 +40,8 @@ public class RogueChestsFcOverlay extends OverlayPanel
     @Override
     public Dimension render(Graphics2D graphics)
     {
+        panelComponent.getChildren().clear();
+
         if (!config.showLowLevelPanel())
         {
             return null;
