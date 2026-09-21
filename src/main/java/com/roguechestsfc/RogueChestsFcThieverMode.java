@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import javax.inject.Inject;
+import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -25,8 +26,12 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Skill;
 import net.runelite.api.Varbits;
 import net.runelite.api.WorldType;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.MenuOptionClicked;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemEquipmentStats;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemStats;
@@ -36,23 +41,35 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LayoutableRenderableEntity;
 import net.runelite.client.ui.overlay.components.TextComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
+import net.runelite.client.util.Text;
 
 @Slf4j
+@Singleton
 public class RogueChestsFcThieverMode extends OverlayPanel
 {
+    private static final String CONFIG_GROUP = "roguechestsfc";
+    private static final String ANTI_PKER_MODE_KEY = "antiPkerMode";
     private static final int ROGUES_CASTLE_REGION_ID = 13117;
     private static final int LOOTING_BAG_CONTAINER_ID = 516;
+    private static final int LOOTING_BAG_ITEM_ID = 11941;
+    private static final int LOOTING_BAG_CHECK_ITEM_OP = 2;
+    private static final Duration LOOTING_BAG_CHECK_TIMEOUT =
+            Duration.ofSeconds(5);
     private static final int MINIMUM_CHEST_XP_DROP = 700;
     private static final int TOTAL_RISK_WARNING_GP = 2_000_000;
     private static final int HIGH_RISK_ITEM_WARNING_GP = 500_000;
     private static final Duration BANK_SOON_WARNING_TIME =
-            Duration.ofMinutes(15);
+            Duration.ofMinutes(1);
     private static final Duration BANK_NOW_WARNING_TIME =
-            Duration.ofMinutes(20);
+            Duration.ofMinutes(2);
     private static final Duration BANK_LOCKOUT_WARNING_TIME =
-            Duration.ofMinutes(30);
-    private static final Duration MISSING_GEAR_POPUP_DURATION =
+            Duration.ofMinutes(3);
+    private static final Duration THIEVING_INACTIVITY_PAUSE =
             Duration.ofSeconds(30);
+    private static final Duration AWAY_FROM_CASTLE_RESET_TIME =
+            Duration.ofMinutes(10);
+    private static final Duration MAX_ACTIVE_TICK_GAP =
+            Duration.ofSeconds(2);
     private static final Duration COMMUNITY_MESSAGE_INTERVAL =
             Duration.ofHours(4);
     private static final int WARNING_OVERLAY_WIDTH = 330;
@@ -82,8 +99,12 @@ public class RogueChestsFcThieverMode extends OverlayPanel
 
     private final Client client;
     private final ItemManager itemManager;
+    private final ConfigManager configManager;
+
+    private boolean antiPkerMode;
 
     private boolean active;
+    private boolean wasInRoguesCastleForAutoEnable;
     private boolean wasInWilderness;
     private boolean fifteenMinuteWarningSent;
     private boolean totalRiskWarningSent;
@@ -94,18 +115,34 @@ public class RogueChestsFcThieverMode extends OverlayPanel
     private int lastThievingXp = -1;
     private int lastBagContentCount = -1;
     private int lastWorld = -1;
+    private Boolean lastInventoryHadLootingBag;
+    private boolean bankInterfaceOpen;
+    private Instant pendingLootingBagCheckUntil;
     private Instant thievingSessionStartedAt;
-    private Instant missingGearPopupUntil;
+    private Instant lastQualifyingThievingXpAt;
+    private Instant lastThievingTimerUpdateAt;
+    private boolean inRequiredFriendsChat;
+    private Instant lastAwayTimerUpdateAt;
+    private Duration accumulatedThievingTime = Duration.ZERO;
+    private Duration accumulatedAwayFromCastleTime = Duration.ZERO;
+    private final List<String> missingEquipmentSlots = new ArrayList<>();
     private Instant lastCommunityMessageAt;
-    private String missingGearPopupText;
 
     @Inject
     public RogueChestsFcThieverMode(
             Client client,
-            ItemManager itemManager)
+            ItemManager itemManager,
+            ConfigManager configManager)
     {
         this.client = client;
         this.itemManager = itemManager;
+        this.configManager = configManager;
+        this.antiPkerMode = Boolean.parseBoolean(
+                configManager.getConfiguration(
+                        CONFIG_GROUP,
+                        ANTI_PKER_MODE_KEY
+                )
+        );
 
         setPosition(OverlayPosition.TOP_CENTER);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
@@ -116,21 +153,61 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         panelComponent.setBorder(new Rectangle(12, 10, 12, 10));
     }
 
-    boolean shouldAutoEnable()
+    boolean toggleAntiPkerMode()
     {
-        return client.getGameState() == GameState.LOGGED_IN
-                && isInRoguesCastleRegion();
+        antiPkerMode = !antiPkerMode;
+        configManager.setConfiguration(
+                CONFIG_GROUP,
+                ANTI_PKER_MODE_KEY,
+                antiPkerMode
+        );
+
+        totalRiskWarningSent = false;
+        gearStateDirty = true;
+
+        if (antiPkerMode)
+        {
+            missingLootingBag = false;
+            missingEquipmentSlots.clear();
+        }
+        else if (active
+                && client.getGameState() == GameState.LOGGED_IN
+                && isInWilderness())
+        {
+            refreshMissingEquipmentState(true);
+        }
+
+        return antiPkerMode;
+    }
+
+    boolean consumeAutoEnableTrigger()
+    {
+        boolean inRoguesCastle =
+                client.getGameState() == GameState.LOGGED_IN
+                        && isInRoguesCastleRegion();
+
+        boolean enteredRoguesCastle =
+                inRoguesCastle
+                        && !wasInRoguesCastleForAutoEnable;
+
+        wasInRoguesCastleForAutoEnable = inRoguesCastle;
+        return enteredRoguesCastle;
     }
 
 
-    void onGameTick(boolean thieverModeActive)
+    void onGameTick(
+            boolean thieverModeActive,
+            boolean inRequiredFriendsChat)
     {
         active = thieverModeActive;
+        this.inRequiredFriendsChat = inRequiredFriendsChat;
 
         if (!active)
         {
             wasInWilderness = false;
             lastThievingXp = -1;
+            lastThievingTimerUpdateAt = null;
+            lastAwayTimerUpdateAt = null;
             lastCommunityMessageAt = null;
             return;
         }
@@ -138,6 +215,8 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         if (client.getGameState() != GameState.LOGGED_IN)
         {
             lastThievingXp = -1;
+            lastThievingTimerUpdateAt = null;
+            lastAwayTimerUpdateAt = null;
             return;
         }
 
@@ -151,9 +230,11 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         }
 
         updateLootingBagContentsState();
+        processPendingLootingBagCheck();
 
         boolean inWilderness = isInWilderness();
         boolean enteredWilderness = inWilderness && !wasInWilderness;
+        boolean leftWilderness = !inWilderness && wasInWilderness;
         wasInWilderness = inWilderness;
 
         if (!inWilderness)
@@ -161,12 +242,11 @@ public class RogueChestsFcThieverMode extends OverlayPanel
             totalRiskWarningSent = false;
         }
 
-        updateThievingTimer();
+        updateThievingTimer(inRequiredFriendsChat);
 
-        if (enteredWilderness)
+        if (enteredWilderness || leftWilderness)
         {
             gearStateDirty = true;
-            checkWildernessEntryEquipment();
         }
 
         RiskSnapshot risk = null;
@@ -174,7 +254,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         if (gearStateDirty)
         {
             risk = refreshPersistentSafetyState();
-            refreshMissingGearPopupState();
+            refreshMissingEquipmentState(enteredWilderness);
             gearStateDirty = false;
         }
         else
@@ -183,6 +263,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         }
 
         if (inWilderness
+                && !antiPkerMode
                 && !totalRiskWarningSent)
         {
             if (risk == null)
@@ -247,15 +328,107 @@ public class RogueChestsFcThieverMode extends OverlayPanel
             gearStateDirty = true;
         }
 
+        if (containerId == InventoryID.INV)
+        {
+            handleLootingBagPresence(event.getItemContainer());
+        }
+
         if (containerId != LOOTING_BAG_CONTAINER_ID)
         {
             return;
         }
 
+        ItemContainer bagContents = event.getItemContainer();
+
         handleLootingBagContents(
-                event.getItemContainer(),
+                bagContents,
                 thieverModeActive
         );
+    }
+
+
+    void onGameStateChanged(GameState gameState)
+    {
+        if (gameState == GameState.LOGGED_IN)
+        {
+            return;
+        }
+
+        lastThievingXp = -1;
+        lastThievingTimerUpdateAt = null;
+        lastAwayTimerUpdateAt = null;
+    }
+
+    void onWidgetLoaded(int groupId)
+    {
+        if (groupId == InterfaceID.BANKMAIN
+                || groupId == InterfaceID.BANK_DEPOSITBOX)
+        {
+            bankInterfaceOpen = true;
+        }
+    }
+
+    void onWidgetClosed(int groupId)
+    {
+        if (groupId == InterfaceID.BANKMAIN
+                || groupId == InterfaceID.BANK_DEPOSITBOX)
+        {
+            bankInterfaceOpen = false;
+        }
+    }
+
+    void onMenuOptionClicked(MenuOptionClicked event)
+    {
+        if (event == null)
+        {
+            return;
+        }
+
+        String rawOption = event.getMenuOption();
+        String rawTarget = event.getMenuTarget();
+        String option = safeLower(Text.removeTags(rawOption)).trim();
+        String target = safeLower(Text.removeTags(rawTarget)).trim();
+
+        boolean lootingBagCheck =
+                active
+                        && thievingSessionStartedAt != null
+                        && event.isItemOp()
+                        && event.getItemId() == LOOTING_BAG_ITEM_ID
+                        && event.getItemOp() == LOOTING_BAG_CHECK_ITEM_OP
+                        && option.equals("check");
+
+        if (lootingBagCheck)
+        {
+            log.info(
+                    "[RogueChestsFC][LootingBagDebug] CHECK detected: action={} id={} param0={} param1={} itemId={} itemOp={}",
+                    event.getMenuAction(),
+                    event.getId(),
+                    event.getParam0(),
+                    event.getParam1(),
+                    event.getItemId(),
+                    event.getItemOp()
+            );
+
+            pendingLootingBagCheckUntil =
+                    Instant.now().plus(LOOTING_BAG_CHECK_TIMEOUT);
+            return;
+        }
+
+        if (!active || thievingSessionStartedAt == null)
+        {
+            return;
+        }
+
+        if (!bankInterfaceOpen)
+        {
+            return;
+        }
+
+        if (target.contains("looting bag")
+                || option.equals("empty containers"))
+        {
+            resetThievingSession();
+        }
     }
 
 
@@ -272,9 +445,17 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         lastThievingXp = -1;
         lastBagContentCount = -1;
         lastWorld = -1;
+        lastInventoryHadLootingBag = null;
+        bankInterfaceOpen = false;
+        pendingLootingBagCheckUntil = null;
+        inRequiredFriendsChat = false;
         thievingSessionStartedAt = null;
-        missingGearPopupUntil = null;
-        missingGearPopupText = null;
+        lastQualifyingThievingXpAt = null;
+        lastThievingTimerUpdateAt = null;
+        lastAwayTimerUpdateAt = null;
+        accumulatedThievingTime = Duration.ZERO;
+        accumulatedAwayFromCastleTime = Duration.ZERO;
+        missingEquipmentSlots.clear();
         lastCommunityMessageAt = null;
         panelComponent.getChildren().clear();
     }
@@ -283,63 +464,26 @@ public class RogueChestsFcThieverMode extends OverlayPanel
     public Dimension render(Graphics2D graphics)
     {
         if (!active
+                || !inRequiredFriendsChat
                 || client.getGameState() != GameState.LOGGED_IN)
         {
             return null;
         }
 
-        List<String> warnings = new ArrayList<>();
+        boolean inRoguesCastle = isInRoguesCastleRegion();
+        boolean bankLockoutActive = isBankLockoutActive();
+        List<String> warnings = getActiveWarnings(
+                inRoguesCastle,
+                isInWilderness(),
+                bankLockoutActive
+        );
 
-        if (isInRoguesCastleRegion())
-        {
-            if (missingLootingBag)
-            {
-                warnings.add("LOOTING BAG REQUIRED");
-                warnings.add("Bring a looting bag before Thieving Rogue Chests.");
-            }
-
-            if (wildernessSwordEquipped)
-            {
-                warnings.add(
-                        "Wilderness Sword is not an acceptable anti-pking weapon for Thieving Rogue Chests"
-                );
-            }
-
-            if (isBankLockoutActive())
-            {
-                warnings.add("30+ MINUTES AT ROGUE CHESTS");
-                warnings.add("STOP THIEVING. BANK YOUR LOOTING BAG IMMEDIATELY.");
-            }
-            else if (isBankNowWarningActive())
-            {
-                warnings.add("20+ MINUTES AT ROGUE CHESTS - BANK ASAP");
-            }
-        }
-
-        if (highRiskExpensiveItem && isInWilderness())
-        {
-            warnings.add("HIGH RISK WORLD");
-            warnings.add("Item worth over 500,000 gp detected.");
-        }
-
-        if (missingGearPopupUntil != null
-                && Instant.now().isBefore(missingGearPopupUntil)
-                && missingGearPopupText != null)
-        {
-            warnings.add(missingGearPopupText);
-        }
-
-        if (isBankLockoutActive()
-                && isInRoguesCastleRegion())
+        if (bankLockoutActive && inRoguesCastle)
         {
             Graphics2D screenGraphics = (Graphics2D) graphics.create();
 
             try
             {
-                // OverlayPanel rendering is translated to the warning box's
-                // position. Move back into canvas coordinates so the tint is
-                // rendered by RuneLite every frame instead of painting directly
-                // onto the AWT canvas between frames.
                 screenGraphics.translate(
                         -getBounds().x,
                         -getBounds().y
@@ -396,45 +540,137 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         }
     }
 
-    private void updateThievingTimer()
+    private List<String> getActiveWarnings(
+            boolean inRoguesCastle,
+            boolean inWilderness,
+            boolean bankLockoutActive)
     {
+        List<String> warnings = new ArrayList<>();
+
+        if (inRoguesCastle)
+        {
+            if (bankLockoutActive)
+            {
+                warnings.add("30+ MINUTES AT ROGUE CHESTS");
+                warnings.add("STOP THIEVING. BANK YOUR LOOTING BAG IMMEDIATELY.");
+            }
+            else if (isBankNowWarningActive())
+            {
+                warnings.add("20+ MINUTES AT ROGUE CHESTS - BANK ASAP");
+            }
+        }
+
+        if (!antiPkerMode
+                && inWilderness
+                && missingEquipmentSlots.size() >= 2)
+        {
+            warnings.add("MISSING REQUIRED EQUIPMENT");
+            warnings.add(String.join(", ", missingEquipmentSlots));
+        }
+
+        if (inRoguesCastle && missingLootingBag)
+        {
+            warnings.add("LOOTING BAG REQUIRED");
+            warnings.add("Bring a looting bag before Thieving Rogue Chests.");
+        }
+
+        if (inRoguesCastle && wildernessSwordEquipped)
+        {
+            warnings.add(
+                    "Wilderness Sword is not an acceptable anti-pking weapon for Thieving Rogue Chests"
+            );
+        }
+
+        if (highRiskExpensiveItem && inWilderness)
+        {
+            warnings.add("HIGH RISK WORLD");
+            warnings.add("Item worth over 500,000 gp detected.");
+        }
+
+        return warnings;
+    }
+
+    private void updateThievingTimer(
+            boolean inRequiredFriendsChat)
+    {
+        Instant now = Instant.now();
         int currentXp = client.getSkillExperience(Skill.THIEVING);
+        boolean inRoguesCastle = isInRoguesCastleRegion();
+
+        updateAwayFromCastleResetState(inRoguesCastle, now);
+
+        if (thievingSessionStartedAt == null)
+        {
+            lastAwayTimerUpdateAt = now;
+        }
 
         if (lastThievingXp < 0)
         {
             lastThievingXp = currentXp;
+            lastThievingTimerUpdateAt = now;
             return;
         }
 
         int xpGain = currentXp - lastThievingXp;
         lastThievingXp = currentXp;
 
-        if (xpGain >= MINIMUM_CHEST_XP_DROP
-                && isInRoguesCastleRegion()
-                && thievingSessionStartedAt == null)
-        {
-            thievingSessionStartedAt = Instant.now();
-            fifteenMinuteWarningSent = false;
+        boolean qualifyingChestXp =
+                xpGain >= MINIMUM_CHEST_XP_DROP
+                        && inRoguesCastle;
 
-            log.debug(
-                    "Thiever timer started from {} Thieving XP gain in Rogue's Castle.",
-                    xpGain
-            );
+        if (qualifyingChestXp)
+        {
+            if (thievingSessionStartedAt == null)
+            {
+                thievingSessionStartedAt = now;
+                accumulatedThievingTime = Duration.ZERO;
+                accumulatedAwayFromCastleTime = Duration.ZERO;
+                fifteenMinuteWarningSent = false;
+
+                log.debug(
+                        "Thiever timer started from {} Thieving XP gain in Rogue's Castle.",
+                        xpGain
+                );
+            }
+
+            lastQualifyingThievingXpAt = now;
         }
 
         if (thievingSessionStartedAt == null)
         {
+            lastThievingTimerUpdateAt = now;
             return;
         }
 
-        Duration elapsed = Duration.between(
-                thievingSessionStartedAt,
-                Instant.now()
-        );
+        boolean xpGraceActive =
+                lastQualifyingThievingXpAt != null
+                        && Duration.between(
+                        lastQualifyingThievingXpAt,
+                        now
+                ).compareTo(THIEVING_INACTIVITY_PAUSE) <= 0;
+
+        if (lastThievingTimerUpdateAt != null
+                && inRoguesCastle
+                && xpGraceActive)
+        {
+            Duration tickDelta =
+                    Duration.between(lastThievingTimerUpdateAt, now);
+
+            if (!tickDelta.isNegative()
+                    && tickDelta.compareTo(MAX_ACTIVE_TICK_GAP) <= 0)
+            {
+                accumulatedThievingTime =
+                        accumulatedThievingTime.plus(tickDelta);
+            }
+        }
+
+        lastThievingTimerUpdateAt = now;
 
         if (!fifteenMinuteWarningSent
-                && isInRoguesCastleRegion()
-                && elapsed.compareTo(BANK_SOON_WARNING_TIME) >= 0)
+                && inRoguesCastle
+                && accumulatedThievingTime.compareTo(
+                BANK_SOON_WARNING_TIME
+        ) >= 0)
         {
             showRedChatMessage(
                     "You have been Thieving Rogue Chests for 15 minutes. You should bank soon."
@@ -443,11 +679,61 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         }
     }
 
-    private void checkWildernessEntryEquipment()
+    private void updateAwayFromCastleResetState(
+            boolean inRoguesCastle,
+            Instant now)
     {
+        if (thievingSessionStartedAt == null)
+        {
+            accumulatedAwayFromCastleTime = Duration.ZERO;
+            lastAwayTimerUpdateAt = now;
+            return;
+        }
+
+        if (inRoguesCastle)
+        {
+            accumulatedAwayFromCastleTime = Duration.ZERO;
+            lastAwayTimerUpdateAt = now;
+            return;
+        }
+
+        if (lastAwayTimerUpdateAt != null)
+        {
+            Duration tickDelta =
+                    Duration.between(lastAwayTimerUpdateAt, now);
+
+            if (!tickDelta.isNegative()
+                    && tickDelta.compareTo(MAX_ACTIVE_TICK_GAP) <= 0)
+            {
+                accumulatedAwayFromCastleTime =
+                        accumulatedAwayFromCastleTime.plus(tickDelta);
+            }
+        }
+
+        lastAwayTimerUpdateAt = now;
+
+        if (accumulatedAwayFromCastleTime.compareTo(
+                AWAY_FROM_CASTLE_RESET_TIME
+        ) >= 0)
+        {
+            resetThievingSession();
+        }
+    }
+
+    private void refreshMissingEquipmentState(
+            boolean notifySingleMissingSlot)
+    {
+        missingEquipmentSlots.clear();
+
+        if (antiPkerMode || !isInWilderness())
+        {
+            return;
+        }
+
         EquipmentSnapshot equipment = inspectEquipment();
 
-        if (equipment.missingSlots.size() == 1)
+        if (notifySingleMissingSlot
+                && equipment.missingSlots.size() == 1)
         {
             showRedChatMessage(
                     "You are missing required equipment: "
@@ -455,36 +741,11 @@ public class RogueChestsFcThieverMode extends OverlayPanel
                             + "."
             );
         }
-        else if (equipment.missingSlots.size() >= 2)
+
+        if (equipment.missingSlots.size() >= 2)
         {
-            missingGearPopupText =
-                    "Missing required equipment:\n"
-                            + String.join(", ", equipment.missingSlots);
-            missingGearPopupUntil =
-                    Instant.now().plus(MISSING_GEAR_POPUP_DURATION);
+            missingEquipmentSlots.addAll(equipment.missingSlots);
         }
-    }
-
-    private void refreshMissingGearPopupState()
-    {
-        if (missingGearPopupUntil == null
-                || !isInWilderness())
-        {
-            return;
-        }
-
-        EquipmentSnapshot equipment = inspectEquipment();
-
-        if (equipment.missingSlots.size() < 2)
-        {
-            missingGearPopupUntil = null;
-            missingGearPopupText = null;
-            return;
-        }
-
-        missingGearPopupText =
-                "Missing required equipment:\n"
-                        + String.join(", ", equipment.missingSlots);
     }
 
     private RiskSnapshot refreshPersistentSafetyState()
@@ -513,7 +774,8 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         ItemContainer equipment =
                 client.getItemContainer(InventoryID.WORN);
 
-        missingLootingBag = !containsLootingBag(inventory);
+        missingLootingBag = !antiPkerMode
+                && !containsLootingBag(inventory);
         wildernessSwordEquipped =
                 isWildernessSwordEquipped(equipment);
     }
@@ -710,7 +972,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
             ItemComposition composition =
                     itemManager.getItemComposition(item.getId());
 
-            if (safeLower(composition.getName()).equals("looting bag"))
+            if (safeLower(composition.getName()).startsWith("looting bag"))
             {
                 return true;
             }
@@ -759,10 +1021,9 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         return active
                 && thievingSessionStartedAt != null
                 && isInRoguesCastleRegion()
-                && Duration.between(
-                thievingSessionStartedAt,
-                Instant.now()
-        ).compareTo(BANK_NOW_WARNING_TIME) >= 0;
+                && accumulatedThievingTime.compareTo(
+                BANK_NOW_WARNING_TIME
+        ) >= 0;
     }
 
     boolean isBankLockoutActive()
@@ -770,16 +1031,161 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         return active
                 && thievingSessionStartedAt != null
                 && isInRoguesCastleRegion()
-                && Duration.between(
-                thievingSessionStartedAt,
-                Instant.now()
-        ).compareTo(BANK_LOCKOUT_WARNING_TIME) >= 0;
+                && accumulatedThievingTime.compareTo(
+                BANK_LOCKOUT_WARNING_TIME
+        ) >= 0;
     }
 
-    private void resetThievingSession()
+    void resetThievingSession()
     {
+        lastThievingXp = -1;
         thievingSessionStartedAt = null;
+        lastQualifyingThievingXpAt = null;
+        lastThievingTimerUpdateAt = null;
+        lastAwayTimerUpdateAt = null;
+        accumulatedThievingTime = Duration.ZERO;
+        accumulatedAwayFromCastleTime = Duration.ZERO;
         fifteenMinuteWarningSent = false;
+        pendingLootingBagCheckUntil = null;
+    }
+
+    private void handleLootingBagPresence(
+            ItemContainer inventory)
+    {
+        if (client.getGameState() != GameState.LOGGED_IN
+                || inventory == null)
+        {
+            return;
+        }
+
+        boolean hasLootingBag = containsLootingBag(inventory);
+
+        if (active
+                && thievingSessionStartedAt != null
+                && Boolean.TRUE.equals(lastInventoryHadLootingBag)
+                && !hasLootingBag)
+        {
+            resetThievingSession();
+        }
+
+        lastInventoryHadLootingBag = hasLootingBag;
+    }
+
+    private void processPendingLootingBagCheck()
+    {
+        if (pendingLootingBagCheckUntil == null)
+        {
+            return;
+        }
+
+        Instant now = Instant.now();
+
+        if (now.isAfter(pendingLootingBagCheckUntil))
+        {
+            log.info(
+                    "[RogueChestsFC][LootingBagDebug] CHECK timed out before an empty-bag result was observed."
+            );
+            pendingLootingBagCheckUntil = null;
+            return;
+        }
+
+        Widget universe =
+                client.getWidget(InterfaceID.WildernessLootingbag.UNIVERSE);
+
+        boolean interfaceVisible =
+                universe != null && !universe.isHidden();
+        boolean emptyTextVisible =
+                interfaceVisible && isLootingBagEmptyTextVisible();
+
+        log.info(
+                "[RogueChestsFC][LootingBagDebug] CHECK pending: interfaceVisible={} emptyTextVisible={}",
+                interfaceVisible,
+                emptyTextVisible
+        );
+
+        if (!emptyTextVisible)
+        {
+            return;
+        }
+
+        pendingLootingBagCheckUntil = null;
+
+        log.info(
+                "[RogueChestsFC][LootingBagDebug] Empty checked bag confirmed from looting-bag interface text; resetting thieving session."
+        );
+        resetThievingSession();
+    }
+
+    private boolean isLootingBagEmptyTextVisible()
+    {
+        Widget[] widgets =
+                {
+                        client.getWidget(InterfaceID.WildernessLootingbag.UNIVERSE),
+                        client.getWidget(InterfaceID.WildernessLootingbag.TITLE),
+                        client.getWidget(InterfaceID.WildernessLootingbag.UNIVERSE_GRAPHIC1),
+                        client.getWidget(InterfaceID.WildernessLootingbag.FRAME),
+                        client.getWidget(InterfaceID.WildernessLootingbag.FRAME_GRAPHIC0),
+                        client.getWidget(InterfaceID.WildernessLootingbag.ITEMS),
+                        client.getWidget(InterfaceID.WildernessLootingbag.TOTAL),
+                        client.getWidget(InterfaceID.WildernessLootingbag.TOOLTIP)
+                };
+
+        for (Widget widget : widgets)
+        {
+            if (widgetContainsEmptyLootingBagText(widget, 0))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean widgetContainsEmptyLootingBagText(
+            Widget widget,
+            int depth)
+    {
+        if (widget == null
+                || depth > 4
+                || widget.isHidden())
+        {
+            return false;
+        }
+
+        String widgetText = widget.getText();
+        String text =
+                safeLower(
+                        widgetText == null
+                                ? ""
+                                : Text.removeTags(widgetText)
+                ).trim();
+
+        if (text.contains("the bag is empty"))
+        {
+            return true;
+        }
+
+        Widget[] children = widget.getDynamicChildren();
+
+        for (Widget child : children)
+        {
+            if (widgetContainsEmptyLootingBagText(child, depth + 1))
+            {
+                return true;
+            }
+        }
+
+        children = widget.getStaticChildren();
+
+        for (Widget child : children)
+        {
+            if (widgetContainsEmptyLootingBagText(child, depth + 1))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void updateLootingBagContentsState()

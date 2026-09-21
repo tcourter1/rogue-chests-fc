@@ -320,6 +320,18 @@ public interface RogueChestsFcConfig extends Config
         return true;
     }
 
+    @ConfigItem(
+            keyName = "showHighValueEquipmentWarning",
+            name = "Expensive item warning",
+            description = "Show a warning when a nearby FC member has a visible equipped item above the configured staff threshold",
+            position = 1,
+            section = equipmentInspectionSection
+    )
+    default boolean showHighValueEquipmentWarning()
+    {
+        return true;
+    }
+
     @Range(
             min = 1,
             max = 9
@@ -328,7 +340,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "missingEquipmentThreshold",
             name = "Missing item threshold",
             description = "Number of empty visible equipment slots required to trigger a warning",
-            position = 1,
+            position = 2,
             section = equipmentInspectionSection
     )
     default int missingEquipmentThreshold()
@@ -340,7 +352,7 @@ public interface RogueChestsFcConfig extends Config
             keyName = "equipmentInspectionIgnoredNames",
             name = "Ignore list",
             description = "Players excluded from equipment inspection. Separate names with commas or new lines",
-            position = 2,
+            position = 3,
             section = equipmentInspectionSection
     )
     default String equipmentInspectionIgnoredNames()
