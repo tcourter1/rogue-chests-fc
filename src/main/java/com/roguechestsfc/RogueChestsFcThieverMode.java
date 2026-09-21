@@ -59,11 +59,11 @@ public class RogueChestsFcThieverMode extends OverlayPanel
     private static final int TOTAL_RISK_WARNING_GP = 2_000_000;
     private static final int HIGH_RISK_ITEM_WARNING_GP = 500_000;
     private static final Duration BANK_SOON_WARNING_TIME =
-            Duration.ofMinutes(1);
+            Duration.ofMinutes(15);
     private static final Duration BANK_NOW_WARNING_TIME =
-            Duration.ofMinutes(2);
+            Duration.ofMinutes(20);
     private static final Duration BANK_LOCKOUT_WARNING_TIME =
-            Duration.ofMinutes(3);
+            Duration.ofMinutes(30);
     private static final Duration THIEVING_INACTIVITY_PAUSE =
             Duration.ofSeconds(30);
     private static final Duration AWAY_FROM_CASTLE_RESET_TIME =
