@@ -168,6 +168,7 @@ public class RogueChestsFcLookupService
             if (cachedLevel != null)
             {
                 showF2pJoinMessage(normalizedName, playerName, cachedLevel);
+                showLowLevelJoinMessage(normalizedName, playerName, cachedLevel);
             }
 
             updateLowLevelMemberFromCache(normalizedName, playerName);
@@ -219,6 +220,16 @@ public class RogueChestsFcLookupService
 
     void onMemberJoined(String playerName)
     {
+        processMemberObserved(playerName, true);
+    }
+
+    void onRosterMemberObserved(String playerName)
+    {
+        processMemberObserved(playerName, false);
+    }
+
+    private void processMemberObserved(String playerName, boolean forceJoinMessage)
+    {
         String normalizedName = normalizeName(playerName);
         if (normalizedName.isEmpty())
         {
@@ -232,10 +243,13 @@ public class RogueChestsFcLookupService
             existing.setName(Text.toJagexName(playerName));
         }
 
+        boolean allowJoinMessage = forceJoinMessage
+                || isJoinMessageCooldownExpired(normalizedName);
+
         if (isBanned(playerName))
         {
             handleBannedMember(normalizedName);
-            if (config.showBannedJoinMessage())
+            if (allowJoinMessage && config.showBannedJoinMessage())
             {
                 showJoinNotification(normalizedName, playerName, "(Banned player)");
             }
@@ -244,7 +258,8 @@ public class RogueChestsFcLookupService
         }
 
         boolean unrankedF2p = context.getUnrankedF2pMembers().contains(normalizedName);
-        if (unrankedF2p
+        if (allowJoinMessage
+                && unrankedF2p
                 && config.showF2pJoinMessage()
                 && !context.getIgnoredNames().contains(normalizedName))
         {
@@ -257,7 +272,7 @@ public class RogueChestsFcLookupService
             }
         }
 
-        if (shouldQueueLowLevelJoinMessage(normalizedName))
+        if (allowJoinMessage && shouldQueueLowLevelJoinMessage(normalizedName))
         {
             pendingJoinMessages.add(normalizedName);
 
@@ -269,6 +284,14 @@ public class RogueChestsFcLookupService
         }
 
         queueLookup(playerName);
+    }
+
+    private boolean isJoinMessageCooldownExpired(String normalizedName)
+    {
+        Instant lastMessage = lastJoinMessageTimes.get(normalizedName);
+        return lastMessage == null
+                || Duration.between(lastMessage, Instant.now())
+                .compareTo(JOIN_MESSAGE_COOLDOWN) >= 0;
     }
 
     void onMemberLeft(String normalizedName)
@@ -505,8 +528,7 @@ public class RogueChestsFcLookupService
 
     private boolean shouldQueueLowLevelJoinMessage(String normalizedName)
     {
-        if (suppressJoinMessages
-                || !config.showLowLevelJoinMessage()
+        if (!config.showLowLevelJoinMessage()
                 || context.getIgnoredNames().contains(normalizedName)
                 || context.getBannedNames().contains(normalizedName)
                 || context.getUnrankedF2pMembers().contains(normalizedName))
@@ -514,10 +536,7 @@ public class RogueChestsFcLookupService
             return false;
         }
 
-        Instant lastMessageTime = lastJoinMessageTimes.get(normalizedName);
-        return lastMessageTime == null
-                || Duration.between(lastMessageTime, Instant.now())
-                .compareTo(JOIN_MESSAGE_COOLDOWN) >= 0;
+        return true;
     }
 
     private void showF2pJoinMessage(
@@ -583,15 +602,7 @@ public class RogueChestsFcLookupService
             return;
         }
 
-        Instant now = Instant.now();
-        Instant lastMessageTime = lastJoinMessageTimes.get(normalizedName);
-        if (lastMessageTime != null
-                && Duration.between(lastMessageTime, now).compareTo(JOIN_MESSAGE_COOLDOWN) < 0)
-        {
-            return;
-        }
-
-        lastJoinMessageTimes.put(normalizedName, now);
+        lastJoinMessageTimes.put(normalizedName, Instant.now());
 
         String message = new ChatMessageBuilder()
                 .append(Text.toJagexName(playerName))

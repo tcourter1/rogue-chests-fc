@@ -262,10 +262,23 @@ public class RogueChestsFcFriendsChatService
             return;
         }
 
-        currentMembers.add(normalizedName);
+        /*
+         * Only treat this as a join if the player was not already
+         * present in our tracked FC roster.
+         *
+         * This prevents the RuneLite event and roster reconciliation
+         * from both generating the same join notification.
+         */
+        boolean newlyJoined = currentMembers.add(normalizedName);
+
         rememberRankStatus(member);
         updateCurrentRank(member);
         host.removeCapturedNearbyName(playerName);
+
+        if (!newlyJoined)
+        {
+            return;
+        }
 
         if (!host.isStaffFeaturesActive())
         {
@@ -333,13 +346,22 @@ public class RogueChestsFcFriendsChatService
                 continue;
             }
 
-            rememberRankStatus(member);
-            updateCurrentRank(member);
-
             String normalizedName = normalizeName(member.getName());
-            if (!normalizedName.isEmpty())
+            if (normalizedName.isEmpty())
             {
-                actualMembers.add(normalizedName);
+                continue;
+            }
+
+            actualMembers.add(normalizedName);
+
+            if (!currentMembers.contains(normalizedName))
+            {
+                onMemberJoined(member);
+            }
+            else
+            {
+                rememberRankStatus(member);
+                updateCurrentRank(member);
             }
         }
 
@@ -357,8 +379,6 @@ public class RogueChestsFcFriendsChatService
             host.removeNearbyMemberTracking(normalizedName);
             lookupService.onMemberLeft(normalizedName);
         }
-
-        currentMembers.addAll(actualMembers);
     }
 
     void refreshF2pMemberStates()
@@ -466,21 +486,8 @@ public class RogueChestsFcFriendsChatService
                 rememberRankStatus(member);
                 updateCurrentRank(member);
 
-                /*
-                 * Preserve the old initial-load behavior:
-                 * banned-member notification may fire, but F2P/low-level join
-                 * notifications stay suppressed while the roster is seeded.
-                 */
-                if (host.getBannedNames().contains(normalizedName))
-                {
-                    unrankedF2pMembers.remove(normalizedName);
-                    lookupService.onMemberJoined(playerName);
-                    continue;
-                }
-
-                lookupService.onMemberJoined(playerName);
                 updateF2pMemberState(member);
-                lookupService.refreshFromCurrentMember(playerName);
+                lookupService.onRosterMemberObserved(playerName);
             }
 
             host.removeCurrentMembersFromCapturedList(loadedMembers);
