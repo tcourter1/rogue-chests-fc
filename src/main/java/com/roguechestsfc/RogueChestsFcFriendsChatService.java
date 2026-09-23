@@ -261,14 +261,7 @@ public class RogueChestsFcFriendsChatService
         {
             return;
         }
-
-        /*
-         * Only treat this as a join if the player was not already
-         * present in our tracked FC roster.
-         *
-         * This prevents the RuneLite event and roster reconciliation
-         * from both generating the same join notification.
-         */
+        
         boolean newlyJoined = currentMembers.add(normalizedName);
 
         rememberRankStatus(member);
