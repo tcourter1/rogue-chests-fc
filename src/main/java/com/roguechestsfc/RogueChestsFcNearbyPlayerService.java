@@ -850,7 +850,7 @@ public class RogueChestsFcNearbyPlayerService
         }
 
         int highestItemId = -1;
-        int highestItemPrice = 0;
+        long highestItemPrice = 0L;
 
         for (KitType slot : VISIBLE_EQUIPMENT_SLOTS)
         {
@@ -865,7 +865,7 @@ public class RogueChestsFcNearbyPlayerService
             }
 
             int canonicalId = itemManager.canonicalize(itemId);
-            int price = itemManager.getItemPrice(canonicalId);
+            long price = itemManager.getItemPrice(canonicalId);
 
             if (price >= warningThresholdGp
                     && price > highestItemPrice)
@@ -880,29 +880,13 @@ public class RogueChestsFcNearbyPlayerService
             return;
         }
 
-        String itemName =
-                itemManager
-                        .getItemComposition(highestItemId)
-                        .getName();
-
         String message =
                 new ChatMessageBuilder()
                         .append(
                                 Color.RED,
                                 Text.toJagexName(playerName)
                         )
-                        .append(" is wearing ")
-                        .append(Color.RED, itemName)
-                        .append(" worth ")
-                        .append(
-                                Color.RED,
-                                String.format(
-                                        Locale.ROOT,
-                                        "%,d gp",
-                                        highestItemPrice
-                                )
-                        )
-                        .append(".")
+                        .append(" is risking too much.")
                         .build();
 
         client.addChatMessage(

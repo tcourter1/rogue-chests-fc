@@ -121,13 +121,13 @@ public class RogueChestsFcFriendsChatService
     boolean isInRequiredFriendsChat()
     {
         FriendsChatManager manager = client.getFriendsChatManager();
-        if (manager == null || manager.getName() == null)
+        if (manager == null || manager.getOwner() == null)
         {
             return false;
         }
 
         return normalizeName(REQUIRED_FRIENDS_CHAT)
-                .equals(normalizeName(manager.getName()));
+                .equals(normalizeName(manager.getOwner()));
     }
 
     boolean isStaffAuthorized()

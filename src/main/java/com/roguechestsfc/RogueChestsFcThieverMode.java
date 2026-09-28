@@ -399,16 +399,6 @@ public class RogueChestsFcThieverMode extends OverlayPanel
 
         if (lootingBagCheck)
         {
-            log.info(
-                    "[RogueChestsFC][LootingBagDebug] CHECK detected: action={} id={} param0={} param1={} itemId={} itemOp={}",
-                    event.getMenuAction(),
-                    event.getId(),
-                    event.getParam0(),
-                    event.getParam1(),
-                    event.getItemId(),
-                    event.getItemOp()
-            );
-
             pendingLootingBagCheckUntil =
                     Instant.now().plus(LOOTING_BAG_CHECK_TIMEOUT);
             return;
@@ -819,7 +809,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
     private RiskSnapshot calculateRiskSnapshot()
     {
         long total = 0L;
-        int highestIndividual = 0;
+        long highestIndividual = 0L;
 
         ItemContainer inventory =
                 client.getItemContainer(InventoryID.INV);
@@ -844,7 +834,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
                 }
 
                 int canonicalId = itemManager.canonicalize(item.getId());
-                int price = itemManager.getItemPrice(canonicalId);
+                long price = itemManager.getItemPrice(canonicalId);
 
                 if (price <= 0)
                 {
@@ -856,7 +846,7 @@ public class RogueChestsFcThieverMode extends OverlayPanel
                         price
                 );
 
-                total += (long) price * item.getQuantity();
+                total += price * item.getQuantity();
             }
         }
 
@@ -1082,9 +1072,6 @@ public class RogueChestsFcThieverMode extends OverlayPanel
 
         if (now.isAfter(pendingLootingBagCheckUntil))
         {
-            log.info(
-                    "[RogueChestsFC][LootingBagDebug] CHECK timed out before an empty-bag result was observed."
-            );
             pendingLootingBagCheckUntil = null;
             return;
         }
@@ -1097,12 +1084,6 @@ public class RogueChestsFcThieverMode extends OverlayPanel
         boolean emptyTextVisible =
                 interfaceVisible && isLootingBagEmptyTextVisible();
 
-        log.info(
-                "[RogueChestsFC][LootingBagDebug] CHECK pending: interfaceVisible={} emptyTextVisible={}",
-                interfaceVisible,
-                emptyTextVisible
-        );
-
         if (!emptyTextVisible)
         {
             return;
@@ -1110,9 +1091,6 @@ public class RogueChestsFcThieverMode extends OverlayPanel
 
         pendingLootingBagCheckUntil = null;
 
-        log.info(
-                "[RogueChestsFC][LootingBagDebug] Empty checked bag confirmed from looting-bag interface text; resetting thieving session."
-        );
         resetThievingSession();
     }
 
@@ -1283,11 +1261,11 @@ public class RogueChestsFcThieverMode extends OverlayPanel
     private static class RiskSnapshot
     {
         private final long totalValue;
-        private final int highestIndividualItemValue;
+        private final long highestIndividualItemValue;
 
         private RiskSnapshot(
                 long totalValue,
-                int highestIndividualItemValue)
+                long highestIndividualItemValue)
         {
             this.totalValue = totalValue;
             this.highestIndividualItemValue = highestIndividualItemValue;
